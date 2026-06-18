@@ -1,0 +1,6 @@
+# Normalize text to LF in the repo so shell scripts / configs work on the Linux
+# VPS regardless of the Windows working copy. Keep .bat as CRLF; treat art binary.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.ico binary

@@ -1,0 +1,31 @@
+{
+  "name": "jeezlord",
+  "version": "0.1.0",
+  "description": "Persistent shared-world RTS (AoE2-style) — always-on authoritative server.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "node scripts/build-client.mjs",
+    "gen:assets": "node scripts/gen-assets.mjs",
+    "build": "npm run build:server && npm run build:client",
+    "watch:server": "tsc -p tsconfig.server.json --watch",
+    "watch:client": "node scripts/build-client.mjs --watch",
+    "typecheck:client": "tsc -p tsconfig.client.json",
+    "start": "node dist/server/main.js",
+    "dev": "npm run build && npm run start"
+  },
+  "dependencies": {
+    "pixi.js": "^8.6.6",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.24.2",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.7.2"
+  }
+}

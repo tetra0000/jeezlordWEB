@@ -1,0 +1,58 @@
+// Component definitions for the data-oriented entity store. Each component type
+// is held in its own Map<EntityId, T> on the World (see world.ts).
+import type { EntityId, EntityKind, PlayerId, ResourceType, Vec2 } from '../../shared/types.js';
+
+export interface Transform {
+  x: number;
+  y: number;
+}
+
+export interface Health {
+  hp: number;
+  maxHp: number;
+}
+
+export interface Movement {
+  speed: number; // px per second
+  target: Vec2 | null; // final destination (persisted)
+  path: Vec2[]; // pathfound waypoints (in-memory only; recomputed on load)
+  pathIndex: number; // -1 = needs a path
+  repathCooldown: number; // s until allowed to repath after a failure
+}
+
+export interface Gatherer {
+  state: 'idle' | 'toNode' | 'gathering' | 'toDrop' | 'building';
+  carrying: number;
+  carryType: ResourceType | null;
+  nodeId: EntityId | null;
+  buildTargetId?: EntityId | null; // in-memory only: building being assisted
+}
+
+export interface Construction {
+  buildTime: number; // total seconds
+  elapsed: number; // seconds accumulated
+  complete: boolean;
+}
+
+export interface TrainItem {
+  kind: EntityKind;
+  timeLeft: number;
+  total: number;
+}
+
+export interface CombatState {
+  cooldownLeft: number;
+  targetId: EntityId | null;
+  commanded: boolean; // explicit attack order (don't auto-drop the target)
+  attacking: boolean; // in range of target this tick (drives attack animation)
+}
+
+// A player's live state held in memory.
+export interface PlayerState {
+  id: PlayerId;
+  name: string;
+  color: number;
+  spawnTileX: number;
+  spawnTileY: number;
+  stockpile: { wood: number; gold: number; food: number; stone: number };
+}

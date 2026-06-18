@@ -1,0 +1,28 @@
+# systemd unit for the always-on Jeezlord game server.
+#
+#   sudo cp deploy/jeezlord.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now jeezlord
+#   journalctl -u jeezlord -f      # follow logs
+
+[Unit]
+Description=Jeezlord RTS game server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/jeezlord
+ExecStart=/usr/bin/node dist/server/main.js
+Restart=always
+RestartSec=2
+Environment=NODE_ENV=production
+Environment=PORT=8081
+Environment=DB_PATH=/var/www/jeezlord/data/world.db
+# Graceful shutdown: SIGTERM triggers a final SQLite flush; allow time for it.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+# Jeezlord nginx site config. nginx serves the static client directly and
+# reverse-proxies the WebSocket endpoint (/ws) to the Node process on :8081.
+# Mirrors the FINDAJOB static-serving style, adding the wss upgrade block.
+#
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/jeezlord
+#   sudo ln -s /etc/nginx/sites-available/jeezlord /etc/nginx/sites-enabled/
+#   sudo certbot --nginx -d jeezlord.example.com
+#   sudo nginx -t && sudo systemctl reload nginx
+
+server {
+    listen 80;
+    server_name jeezlord.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name jeezlord.example.com;
+
+    # certbot fills in ssl_certificate / ssl_certificate_key here.
+
+    root /var/www/jeezlord/client;
+    index index.html;
+
+    # WebSocket: proxy to the always-on Node game server.
+    location /ws {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;       # required for the WS upgrade
+        proxy_set_header Connection "upgrade";        # required for the WS upgrade
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 3600s;                     # don't cull long-lived sockets
+        proxy_send_timeout 3600s;
+    }
+
+    # Static client assets (index.html, styles.css, bundle.js, bundle.js.map).
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Jeezlord</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Login / register overlay -->
+    <div id="login" class="overlay">
+      <form id="login-form" class="panel">
+        <img id="logo" src="assets/logo.png" alt="Jeezlord" />
+        <p class="tagline">A persistent shared-world RTS</p>
+        <input id="username" type="text" placeholder="username" autocomplete="username" />
+        <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+        <div class="buttons">
+          <button type="submit" id="login-btn">Log in</button>
+          <button type="button" id="register-btn">Register</button>
+        </div>
+        <p id="login-error" class="error"></p>
+      </form>
+    </div>
+
+    <!-- In-game HUD -->
+    <div id="hud" class="hidden">
+      <div id="resources">
+        <span>🌲 <b id="r-wood">0</b></span>
+        <span>🪙 <b id="r-gold">0</b></span>
+        <span>🍖 <b id="r-food">0</b></span>
+        <span>🪨 <b id="r-stone">0</b></span>
+        <span>👤 <b id="r-pop">0/0</b></span>
+      </div>
+      <div id="coords">0, 0</div>
+      <div id="command-panel"></div>
+      <div id="hint">L-click/drag: select · R-click: move/gather/attack · WASD/wheel: pan/zoom · Esc: cancel</div>
+      <canvas id="minimap" width="200" height="200"></canvas>
+      <div id="tooltip" class="hidden"></div>
+      <div id="toast"></div>
+      <div id="conn-status">connecting…</div>
+    </div>
+
+    <script type="module" src="bundle.js"></script>
+  </body>
+</html>

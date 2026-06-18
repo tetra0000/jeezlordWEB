@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Deploy Jeezlord on the VPS: pull, install, build, restart the service.
+# Build artifacts (dist/, client/bundle.js) and data/world.db are gitignored,
+# so a pull never clobbers the live world.
+#
+#   cp deploy/deploy.sh.example deploy.sh && chmod +x deploy.sh && ./deploy.sh
+set -euo pipefail
+
+cd /var/www/jeezlord
+
+git pull
+npm ci
+npm run build
+
+# Restart sends SIGTERM -> final flush -> clean start. Connected clients
+# auto-reconnect (resume) within a couple of seconds.
+sudo systemctl restart jeezlord
+sudo systemctl --no-pager status jeezlord | head -n 5

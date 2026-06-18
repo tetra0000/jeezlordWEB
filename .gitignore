@@ -1,0 +1,10 @@
+node_modules/
+dist/
+client/bundle.js
+client/bundle.js.map
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+*.log
+.DS_Store
