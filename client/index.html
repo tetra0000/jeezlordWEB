@@ -33,11 +33,15 @@
       </div>
       <div id="coords">0, 0</div>
       <div id="command-panel"></div>
-      <div id="hint">L-click/drag: select · R-click: move/gather/attack · WASD/wheel: pan/zoom · Esc: cancel</div>
+      <div id="villager-panel" class="hidden"></div>
+      <div id="admin-panel" class="hidden"></div>
+      <div id="info-panel" class="hidden"></div>
+      <div id="hint">Assign villager jobs (bottom-left) · L-click/drag: select army · R-click: move/attack/rally · Build inside your territory · WASD/wheel: pan/zoom · Esc: cancel</div>
       <canvas id="minimap" width="200" height="200"></canvas>
       <div id="tooltip" class="hidden"></div>
       <div id="toast"></div>
       <div id="conn-status">connecting…</div>
+      <button id="sound-toggle" title="Toggle sound (M)">🔊</button>
     </div>
 
     <script type="module" src="bundle.js"></script>

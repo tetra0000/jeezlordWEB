@@ -22,6 +22,13 @@ export class Fog {
   }
 
   update(state: ClientState): void {
+    // Admin reveal: hide the dimming layer entirely (server is also sending all
+    // entities, so there's nothing to dim).
+    if (state.adminReveal) {
+      this.dark.visible = false;
+      return;
+    }
+    this.dark.visible = true;
     this.mask.clear();
     let any = false;
     for (const e of state.entities.values()) {

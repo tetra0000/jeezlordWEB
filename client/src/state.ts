@@ -2,7 +2,7 @@
 // target positions) plus interpolated render positions, the local player's
 // identity/stockpile, and the current selection. Pure data — render and input
 // modules read/write this.
-import type { EntityView, EntityId, PlayerId, Pop, Stockpile } from '../../shared/types.js';
+import type { EntityView, EntityId, JobReport, PlayerId, Pop, Stockpile } from '../../shared/types.js';
 import type { DeltaMsg } from '../../shared/protocol.js';
 import { TILE } from '../../shared/constants.js';
 import { BUILDING_STATS, isBuilding } from '../../shared/stats.js';
@@ -18,13 +18,23 @@ export class ClientState {
   playerId: PlayerId = -1;
   mapTiles = 0;
   tile = 32;
+  terrain: Uint8Array | null = null; // static terrain grid (mapTiles²), from init
   stockpile: Stockpile = { wood: 0, gold: 0, food: 0, stone: 0 };
   pop: Pop = { used: 0, cap: 0 };
 
   readonly entities = new Map<EntityId, ClientEntity>();
   readonly selection = new Set<EntityId>();
 
+  // Admin mode (cheat panel) state, driven by server `adminState` messages.
+  adminEnabled = false;
+  adminReveal = false;
+
+  // Villager-jobs summary (counts/caps/idle), from the delta. Drives the
+  // villager panel; null until the first delta carrying it arrives.
+  jobs: JobReport | null = null;
+
   applyDelta(d: DeltaMsg): void {
+    if (d.jobs) this.jobs = d.jobs;
     for (const v of d.enter) {
       this.entities.set(v.id, { view: v, rx: v.x, ry: v.y });
     }
@@ -66,5 +76,6 @@ export class ClientState {
   reset(): void {
     this.entities.clear();
     this.selection.clear();
+    this.jobs = null;
   }
 }

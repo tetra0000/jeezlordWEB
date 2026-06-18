@@ -5,11 +5,13 @@
 // TIME_SCALE (env) multiplies simulation dt — leave at 1 for real (slow) pacing;
 // set higher to fast-forward the whole sim for testing.
 import { TICK_MS } from '../../shared/constants.js';
+import { jobsSystem } from './systems/jobs.js';
 import { pathfindingSystem } from './systems/pathfinding.js';
 import { movementSystem } from './systems/movement.js';
 import { gatherSystem } from './systems/gather.js';
 import { farmSystem } from './systems/farm.js';
 import { constructionSystem } from './systems/construction.js';
+import { territorySystem } from './systems/territory.js';
 import { trainingSystem } from './systems/training.js';
 import { combatSystem } from './systems/combat.js';
 import type { World } from './world.js';
@@ -66,12 +68,15 @@ export class GameLoop {
 
   private advance(): void {
     this.tick++;
-    // Deterministic system order.
+    // Deterministic system order. Jobs runs first so freshly-tasked villagers
+    // (assigned a node/foundation/farm) pathfind the same tick.
+    jobsSystem(this.world, DT);
     pathfindingSystem(this.world);
     movementSystem(this.world, DT);
     gatherSystem(this.world, DT);
     farmSystem(this.world, DT);
     constructionSystem(this.world, DT);
+    territorySystem(this.world, DT);
     trainingSystem(this.world, DT);
     combatSystem(this.world, DT);
     this.onTick(this.tick);

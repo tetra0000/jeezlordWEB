@@ -3,13 +3,14 @@
 // and training progress. Each unit's `action` drives a procedural animation
 // (chopping / mining / picking / hammering / fighting / walking) plus short-lived
 // effect particles. Positions interpolate toward the authoritative target.
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Point, Sprite, Text } from 'pixi.js';
 import { TILE } from '../../../shared/constants.js';
 import { BUILDING_STATS, isBuilding, isResourceNode } from '../../../shared/stats.js';
 import type { Action, EntityId, EntityKind } from '../../../shared/types.js';
 import type { ClientState } from '../state.js';
 import { ownerColor } from './colors.js';
 import { tex } from './assets.js';
+import { sound, type SoundName, panAt, vary } from '../audio/sound.js';
 
 interface Sprite_ {
   node: Container;
@@ -18,15 +19,33 @@ interface Sprite_ {
   hpBg: Graphics;
   hpFg: Graphics;
   prog: Graphics;
+  label?: Text; // town-center name label
   half: number;
   phase: number; // per-entity animation offset
   fxTimer: number;
+  hpShown: boolean; // last health-bar visibility (so geometry only rebuilds on change)
+  hpRatio: number; // last drawn hp ratio
+  progKey: string; // last drawn construction/training state
 }
 
 interface Effect {
   spr: Sprite;
   life: number;
+  maxLife: number;
+  vx: number;
   vy: number;
+}
+
+// Expanding ground ring (move/attack/gather marker, building-complete flash).
+interface Ping {
+  g: Graphics;
+  x: number;
+  y: number;
+  life: number;
+  maxLife: number;
+  r0: number;
+  r1: number;
+  color: number;
 }
 
 const INTERP_RATE = 12;
@@ -49,15 +68,47 @@ const FX_FOR: Partial<Record<Action, string>> = {
   attack: 'fx_slash',
 };
 
+// Looping work-action SFX (positional, throttled in the sound engine). Combat
+// audio comes from actual damage events (hp drops), not the attack swing, so
+// 'attack' is intentionally absent here.
+const SFX_FOR: Partial<Record<Action, SoundName>> = {
+  gatherWood: 'chop',
+  gatherGold: 'mine',
+  gatherStone: 'mine',
+  gatherFood: 'forage',
+  build: 'hammer',
+};
+
 export class EntityLayer {
   readonly container = new Container();
   private readonly fxLayer = new Container();
+  private readonly rallyG = new Graphics(); // rally flags for selected buildings
   private readonly sprites = new Map<EntityId, Sprite_>();
   private readonly effects: Effect[] = [];
+  private readonly pings: Ping[] = [];
+  private readonly tmp = new Point();
   private t = 0;
 
   constructor() {
     this.container.addChild(this.fxLayer);
+    this.container.addChild(this.rallyG);
+  }
+
+  // Draw a rally flag (+ a line from the building) for every selected own
+  // building that has a rally point set.
+  private drawRallyFlags(state: ClientState): void {
+    const g = this.rallyG;
+    g.clear();
+    for (const id of state.selection) {
+      const e = state.entities.get(id);
+      if (!e || !e.view.rally) continue;
+      const { x, y } = e.view.rally;
+      g.moveTo(e.rx, e.ry).lineTo(x, y).stroke({ width: 1.5, color: 0xffd24a, alpha: 0.5 });
+      // Flag: pole + pennant at the rally point.
+      g.moveTo(x, y).lineTo(x, y - 18).stroke({ width: 2, color: 0xffe9a8 });
+      g.poly([x, y - 18, x + 12, y - 14, x, y - 10]).fill({ color: 0xffd24a });
+      g.circle(x, y, 3).fill({ color: 0xffd24a, alpha: 0.8 });
+    }
   }
 
   private create(state: ClientState, id: EntityId): Sprite_ {
@@ -88,21 +139,94 @@ export class EntityLayer {
     prog.visible = false;
     node.addChild(hpBg, hpFg, prog);
 
+    let label: Text | undefined;
+    if (kind === 'townCenter') {
+      label = new Text({
+        text: '',
+        style: { fontSize: 13, fill: 0xffffff, fontFamily: 'system-ui, sans-serif', stroke: { color: 0x000000, width: 3 } },
+      });
+      label.anchor.set(0.5, 1);
+      label.y = -half - 4;
+      label.visible = false;
+      node.addChild(label);
+    }
+
     this.container.addChild(node);
-    const s: Sprite_ = { node, body, ring, hpBg, hpFg, prog, half, phase: (id * 1.7) % 6.283, fxTimer: 0 };
+    const s: Sprite_ = {
+      node, body, ring, hpBg, hpFg, prog, label, half,
+      phase: (id * 1.7) % 6.283, fxTimer: 0, hpShown: false, hpRatio: -1, progKey: '',
+    };
     this.sprites.set(id, s);
     return s;
   }
 
-  private spawnEffect(kind: string, x: number, y: number): void {
+  get spriteCount(): number {
+    return this.sprites.size;
+  }
+  get fxCount(): number {
+    return this.effects.length + this.pings.length;
+  }
+
+  private spawnEffect(
+    kind: string,
+    x: number,
+    y: number,
+    opts: { vx?: number; vy?: number; life?: number; scale?: number } = {},
+  ): void {
     const t = tex[kind];
     if (!t) return;
     const spr = new Sprite(t);
     spr.anchor.set(0.5);
     spr.x = x;
     spr.y = y;
+    if (opts.scale != null) spr.scale.set(opts.scale);
     this.fxLayer.addChild(spr);
-    this.effects.push({ spr, life: 0.5, vy: -22 });
+    const life = opts.life ?? 0.5;
+    this.effects.push({ spr, life, maxLife: life, vx: opts.vx ?? 0, vy: opts.vy ?? -22 });
+  }
+
+  // --- public event FX (called from the delta/command layers) ---------------
+
+  // Expanding ground ring used as a command marker / completion flash.
+  ping(x: number, y: number, color: number, r1 = 34): void {
+    const g = new Graphics();
+    this.fxLayer.addChild(g);
+    this.pings.push({ g, x, y, life: 0.5, maxLife: 0.5, r0: 6, r1, color });
+  }
+
+  // A spray of particles flying outward from a point.
+  private burst(kind: string, x: number, y: number, count: number, speed: number): void {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = speed * (0.5 + Math.random());
+      this.spawnEffect(kind, x, y, {
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp - 12,
+        life: 0.35 + Math.random() * 0.25,
+      });
+    }
+  }
+
+  // Combat impact: a slash plus a couple of sparks.
+  hitFx(x: number, y: number): void {
+    this.spawnEffect('fx_slash', x, y, { vy: -8, life: 0.3 });
+    this.burst('fx_spark', x, y, 2, 34);
+  }
+
+  // Unit/building destroyed: a dust cloud + slash.
+  deathFx(x: number, y: number): void {
+    this.burst('fx_dust', x, y, 5, 30);
+    this.spawnEffect('fx_slash', x, y, { vy: -6, life: 0.4, scale: 1.4 });
+  }
+
+  // Construction finished: golden ring + rising sparks.
+  completeFx(x: number, y: number): void {
+    this.ping(x, y, 0xffd24a, 48);
+    for (let i = 0; i < 4; i++)
+      this.spawnEffect('fx_spark', x + (Math.random() - 0.5) * 24, y, {
+        vy: -40 - Math.random() * 20,
+        life: 0.6,
+      });
   }
 
   // Apply the per-action animation to a unit's body sprite (transforms only).
@@ -141,12 +265,19 @@ export class EntityLayer {
       default:
         break;
     }
-    // Spawn work particles.
+    // Spawn work particles + a looped, positional work sound on the same
+    // cadence (the sound engine throttles per-name, so a crowd stays a rhythm).
     const fx = action ? FX_FOR[action] : undefined;
     s.fxTimer -= dt;
     if (fx && s.fxTimer <= 0) {
       s.fxTimer = 0.28;
       this.spawnEffect(fx, s.node.x + (Math.random() - 0.5) * 6, s.node.y - s.half);
+      const sfx = action ? SFX_FOR[action] : undefined;
+      if (sfx) {
+        const p = s.node.getGlobalPosition(this.tmp); // screen-space (CSS px)
+        if (p.x >= -40 && p.x <= window.innerWidth + 40 && p.y >= -40 && p.y <= window.innerHeight + 40)
+          sound.play(sfx, { pan: panAt(p.x), rate: vary() });
+      }
     }
   }
 
@@ -179,45 +310,88 @@ export class EntityLayer {
         this.animate(s, e.view.action, dtSeconds);
       }
 
-      // Health bar.
+      // Health bar — only rebuild the geometry when it actually changes. Most
+      // entities (every resource node, every idle building) sit at full hp, so
+      // this skips a per-frame Graphics rebuild across the whole world.
       const ratio = e.view.maxHp > 0 ? e.view.hp / e.view.maxHp : 1;
       const showHp = (ratio < 0.999 && building == null) || state.selection.has(id);
-      s.hpBg.visible = showHp;
-      if (showHp) {
-        const w = s.half * 2 * Math.max(0, ratio);
-        const col = ratio > 0.5 ? 0x4ad96a : ratio > 0.25 ? 0xd9c14a : 0xd94a4a;
-        s.hpFg.clear().rect(-s.half, -s.half - 8, w, 4).fill(col);
-      } else {
-        s.hpFg.clear();
+      if (showHp !== s.hpShown || (showHp && Math.abs(ratio - s.hpRatio) > 0.002)) {
+        s.hpShown = showHp;
+        s.hpRatio = ratio;
+        s.hpBg.visible = showHp;
+        if (showHp) {
+          const w = s.half * 2 * Math.max(0, ratio);
+          const col = ratio > 0.5 ? 0x4ad96a : ratio > 0.25 ? 0xd9c14a : 0xd94a4a;
+          s.hpFg.clear().rect(-s.half, -s.half - 8, w, 4).fill(col);
+        } else {
+          s.hpFg.clear();
+        }
       }
 
-      // Progress bar: construction (blue) or training (yellow).
-      if (building != null) {
-        s.prog.visible = true;
-        s.prog.clear().rect(-s.half, s.half + 4, s.half * 2 * building, 4).fill(0x6ab0ff);
-      } else if (e.view.train) {
-        s.prog.visible = true;
-        const tr = e.view.train;
-        s.prog
-          .clear()
-          .rect(-s.half, s.half + 4, s.half * 2, 4)
-          .fill(0x222222)
-          .rect(-s.half, s.half + 4, s.half * 2 * tr.pct, 4)
-          .fill(0xffd24a);
-      } else {
-        s.prog.visible = false;
+      // Progress bar: construction (blue) or training (yellow). Keyed on the
+      // percentage so it redraws at the sim rate (~10 Hz), not every frame.
+      const progKey = building != null ? `b${building.toFixed(3)}`
+        : e.view.train ? `t${e.view.train.pct.toFixed(3)}` : '';
+      if (progKey !== s.progKey) {
+        s.progKey = progKey;
+        if (building != null) {
+          s.prog.visible = true;
+          s.prog.clear().rect(-s.half, s.half + 4, s.half * 2 * building, 4).fill(0x6ab0ff);
+        } else if (e.view.train) {
+          s.prog.visible = true;
+          const tr = e.view.train;
+          s.prog
+            .clear()
+            .rect(-s.half, s.half + 4, s.half * 2, 4)
+            .fill(0x222222)
+            .rect(-s.half, s.half + 4, s.half * 2 * tr.pct, 4)
+            .fill(0xffd24a);
+        } else {
+          s.prog.visible = false;
+          s.prog.clear();
+        }
+      }
+
+      // Town-center name label.
+      if (s.label) {
+        const nm = e.view.name ?? '';
+        if (nm) {
+          if (s.label.text !== nm) s.label.text = nm;
+          s.label.visible = true;
+        } else {
+          s.label.visible = false;
+        }
       }
     }
+
+    this.drawRallyFlags(state);
 
     // Advance + cull effect particles.
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const fx = this.effects[i];
       fx.life -= dtSeconds;
+      fx.spr.x += fx.vx * dtSeconds;
       fx.spr.y += fx.vy * dtSeconds;
-      fx.spr.alpha = Math.max(0, fx.life / 0.5);
+      fx.spr.alpha = Math.max(0, fx.life / fx.maxLife);
       if (fx.life <= 0) {
         fx.spr.destroy();
         this.effects.splice(i, 1);
+      }
+    }
+
+    // Advance + cull expanding rings (command markers / completion flash).
+    for (let i = this.pings.length - 1; i >= 0; i--) {
+      const p = this.pings[i];
+      p.life -= dtSeconds;
+      const f = 1 - Math.max(0, p.life) / p.maxLife;
+      const radius = p.r0 + (p.r1 - p.r0) * f;
+      p.g
+        .clear()
+        .circle(p.x, p.y, radius)
+        .stroke({ width: 2.5, color: p.color, alpha: Math.max(0, p.life / p.maxLife) });
+      if (p.life <= 0) {
+        p.g.destroy();
+        this.pings.splice(i, 1);
       }
     }
   }

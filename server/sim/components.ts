@@ -1,6 +1,13 @@
 // Component definitions for the data-oriented entity store. Each component type
 // is held in its own Map<EntityId, T> on the World (see world.ts).
-import type { EntityId, EntityKind, PlayerId, ResourceType, Vec2 } from '../../shared/types.js';
+import type {
+  EntityId,
+  EntityKind,
+  PlayerId,
+  ResourceType,
+  Vec2,
+  VillagerJob,
+} from '../../shared/types.js';
 
 export interface Transform {
   x: number;
@@ -26,6 +33,12 @@ export interface Gatherer {
   carryType: ResourceType | null;
   nodeId: EntityId | null;
   buildTargetId?: EntityId | null; // in-memory only: building being assisted
+  // The job the player assigned this villager. The jobs system auto-tasks the
+  // villager from this (find a node / farm / foundation). Persisted.
+  job: VillagerJob;
+  // Sim-seconds this villager has gone without any work to do (job unsatisfiable
+  // right now). Drives the "idle villagers" warning. In-memory only.
+  idleTime: number;
 }
 
 export interface Construction {
@@ -55,4 +68,7 @@ export interface PlayerState {
   spawnTileX: number;
   spawnTileY: number;
   stockpile: { wood: number; gold: number; food: number; stone: number };
+  // Desired villager count per non-builder job (builder is the remainder). The
+  // jobs system clamps each to the kingdom's current capacity. Persisted.
+  jobDesired: Partial<Record<VillagerJob, number>>;
 }

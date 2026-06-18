@@ -32,20 +32,75 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 - `client/src/` — `render/` (Pixi), `input/` (camera, selection/commands),
   `net.ts`, `state.ts`. Bundled by esbuild → `client/bundle.js`.
 
+## Villager jobs (v8) — villagers are NOT hand-controlled
+
+- The player never moves/gathers individual villagers. They **assign job counts**
+  (bottom-left villager panel → `assignJob` intent); the sim auto-tasks each
+  villager. See `server/sim/systems/jobs.ts` (runs FIRST each tick).
+- **Jobs:** `builder` (default for every new villager — walks to and finishes any
+  unbuilt foundation inside the kingdom's territory), plus gathering jobs
+  `lumberjack`/`stonemason`/`goldminer`/`forager`/`farmer`.
+- **Capacity** is summed from operational buildings' `BuildingStat.jobSlots`:
+  Town Center grants 2 each of lumberjack/stonemason/goldminer/forager + a
+  `gatherRadius` (the base camp); Lumber/Mining Camps add capacity for their job
+  and open a new gather radius; a **Mill** adds forager slots + radius (it's the
+  food/forage camp and the farm/berry food drop-off); each **Farm** grants exactly
+  1 farmer and IS that farmer's workplace. `assignJob` is clamped to capacity AND
+  to villagers available; the remainder are builders.
+- Gathering jobs find the nearest matching neutral node within a host building's
+  `gatherRadius`; farmers bind 1:1 to a farm. A villager that can find no work
+  accrues `idleTime` (sim-seconds); the per-player `JobReport` (owner-only, in the
+  delta) carries `counts`/`caps`/`idleLong`, driving the panel + the "idle over an
+  hour" warning (`IDLE_WARN_S`).
+- Per-villager `job` persists in `ent_gather.job`; desired counts in the
+  `player_jobs` table (`PlayerState.jobDesired`).
+- **Military units are still hand-controlled** (`move`/`attack`/`stop`); the
+  client excludes villagers from box-select and command. Villagers must stand
+  within **half a tile** of a target to work it (`nearTarget` in `gather.ts`,
+  used by gather + construction — replaces the old `BUILD_RANGE`/`GATHER_RANGE`).
+
 ## Resources & drop-off (AoE-style)
 
 - Resource nodes (`tree`/`gold`/`stone`/`berry`) are neutral, finite, and block
-  their tile. Villagers harvest, then deposit at the nearest owned building that
-  **accepts** the carried type (`BuildingStat.accepts: ResourceType[]`):
+  their tile. Villagers (per their job) harvest, then deposit at the nearest owned
+  building that **accepts** the carried type (`BuildingStat.accepts: ResourceType[]`):
   Town Center = all four, Mill = food, Lumber Camp = wood, Mining Camp =
   gold+stone. Players start with a **Town Center** (also trains villagers, gives
-  pop + vision; rebuildable but expensive). Houses are population-only.
+  pop + vision + territory; rebuildable but expensive). Houses are pop-only.
 - **Fog memory for resources:** once a player's vision touches a resource node it
   is added to `World.discoveredResources[playerId]` and thereafter always sent to
   that player (even out of vision) — see `snapshot.ts`. This is safe because
   nodes are neutral; **enemy** units/buildings are still withheld out of vision
   (the anti-cheat boundary is unchanged). Discovered set is in-memory only.
-- Farms remain a passive food trickle (no villager/drop-off), see `farm.ts`.
+- **Farms are AoE2-style** (not a passive trickle): a villager harvests food from
+  the farm's finite store (`resourceAmount`, seeded to `FARM_FOOD`) and hauls it
+  to a food drop-off, like a resource node — the gather system special-cases
+  `kind === 'farm'` (food; 2×2 → wider approach range; doesn't vanish when empty).
+  An empty farm is **auto-reseeded** by `farm.ts` (spends `FARM_RESEED_COST` wood)
+  unless the owner toggles it off (`World.farmAuto`, per-farm `farmReseed` intent).
+
+## Territory & construction
+
+- **Construction needs a builder villager.** A placed building is a foundation
+  that only advances while ≥1 of the owner's villagers is in the `building`
+  gatherer state *and* within `nearTarget` range; more builders finish faster with
+  diminishing returns (`n^0.75`). No builders ⇒ progress pauses (no decay). See
+  `construction.ts`. The `build` intent just places the foundation (no builder
+  list) — the jobs system auto-tasks idle builders inside territory to it. Build
+  time is stretched by `BUILD_DURATION_SCALE` via `buildTimeOf()`.
+- **Territory is the buildable zone.** Each *operational* Town Center projects a
+  circle, radius `TERRITORY_MIN_TILES` → `TERRITORY_MAX_TILES` over
+  `TERRITORY_GROW_TIME_S` of sim-time (`territory.ts`, `World.tcRadius`). A
+  player's territory is the union of their TCs' circles. Placement (`dispatch.ts`
+  build): a normal building's whole footprint must be inside; a TC need only
+  **touch** it (frontier TCs push the border outward); with no TCs, only a TC may
+  be placed (recovery). Geometry is in `shared/territory.ts` — used by the server
+  check, the client ghost tint, and the border render
+  (`client/src/render/territory.ts`).
+- TCs can be **named/renamed** (`World.tcName`, `rename` intent), shown on the map
+  label + tooltip + info panel. `territory`/`name` are public on the wire;
+  `rally`/`farmAuto` are owner-only (stripped in `snapshot.ts`). The per-building
+  extras persist via the `ent_building_meta` sidecar table.
 
 ## Sprites, animation & tooltip (client)
 
@@ -81,11 +136,13 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 
 ## Systems (run each tick, in this order — see `sim/loop.ts`)
 
-`pathfinding` (A* on the tile grid, bounded request queue) → `movement` (follows
-waypoints off-grid) → `gather` (villager harvest/haul/deposit) → `farm`
-(renewable food trickle) → `construction` (auto-progress) → `training` (queue
-drain + spawn) → `combat` (acquire/chase/attack/kill). Each runs over ALL
-entities regardless of owner online status.
+`jobs` (reconcile villager job assignments + auto-task each villager to a
+node/farm/foundation) → `pathfinding` (A* on the tile grid, bounded request
+queue) → `movement` (follows waypoints off-grid) → `gather` (villager
+harvest/haul/deposit, incl. farms) → `farm` (auto-reseed empty farms) →
+`construction` (advance only with builders present) → `territory` (grow TC radii)
+→ `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill). Each
+runs over ALL entities regardless of owner online status.
 
 `TIME_SCALE` env multiplies the sim dt (default 1 = real slow pacing). Set high
 (e.g. 30) to fast-forward for tests; the test scripts assume this.
@@ -106,8 +163,10 @@ gather/farm rates, costs, vision). Adjust pacing there, never in system code.
 
 - `npm run build` — server + client. `npm start` — run (serves client + ws :8081).
 - `npm run typecheck:client` — type-check the client (esbuild doesn't type-check).
-- `node scripts/smoke.mjs` / `test-economy.mjs` / `test-combat.mjs` / `test-farm.mjs`
-  — end-to-end checks against a running (ideally `TIME_SCALE=30`) server.
+- `node scripts/smoke.mjs` / `test-economy.mjs` / `test-jobs.mjs` /
+  `test-combat.mjs` / `test-farm.mjs` / `test-territory.mjs` /
+  `test-resources.mjs` — end-to-end checks against a running (ideally
+  `TIME_SCALE=30`) server.
 
 ## Gotchas (this is the first persistent-process project here)
 

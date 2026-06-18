@@ -6,13 +6,18 @@ import type { ClientMsg } from '../../shared/protocol.js';
 import { MAP_PX, TILE } from '../../shared/constants.js';
 import {
   BUILDING_STATS,
+  NON_BUILDER_JOBS,
   UNIT_STATS,
   costOf,
   isBuilding,
-  isResourceNode,
   isUnit,
 } from '../../shared/stats.js';
 import type { Cost } from '../../shared/stats.js';
+import {
+  footprintInTerritory,
+  footprintTouchesTerritory,
+  type TerritorySource,
+} from '../../shared/territory.js';
 import type { EntityKind, Stockpile } from '../../shared/types.js';
 import {
   type GameContext,
@@ -29,6 +34,19 @@ function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+// How much each "boost resources" admin click adds to every stockpile.
+const ADMIN_RESOURCE_BOOST = 10_000;
+
+// Tell a player's client about its current admin-mode state so the cheat panel
+// can show/hide and the fog overlay can clear when reveal is on.
+function sendAdminState(world: World, session: Session, playerId: number): void {
+  session.send({
+    t: 'adminState',
+    enabled: world.admin.has(playerId),
+    reveal: world.adminReveal.has(playerId),
+  });
+}
+
 function canAfford(s: Stockpile, c: Cost): boolean {
   return (
     s.wood >= (c.wood ?? 0) &&
@@ -37,6 +55,18 @@ function canAfford(s: Stockpile, c: Cost): boolean {
     s.stone >= (c.stone ?? 0)
   );
 }
+// The player's territory: a circle around each of their operational town
+// centers. Used to validate building placement.
+function territorySources(world: World, playerId: number): TerritorySource[] {
+  const out: TerritorySource[] = [];
+  for (const [id, owner] of world.owner) {
+    if (owner !== playerId || world.kind.get(id) !== 'townCenter' || !world.isOperational(id)) continue;
+    const tf = world.transform.get(id)!;
+    out.push({ x: tf.x, y: tf.y, radiusTiles: world.tcRadius.get(id) ?? 0 });
+  }
+  return out;
+}
+
 function pay(world: World, playerId: number, c: Cost): void {
   const s = world.players.get(playerId)!.stockpile;
   s.wood -= c.wood ?? 0;
@@ -70,12 +100,8 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
         if (!world.movement.has(id)) continue;
-        // Manual move cancels gather/attack intent.
-        const g = world.gatherer.get(id);
-        if (g) {
-          g.state = 'idle';
-          g.nodeId = null;
-        }
+        // Villagers are not hand-controlled — they follow their assigned job.
+        if (world.gatherer.has(id)) continue;
         const cs = world.combat.get(id);
         if (cs) {
           cs.targetId = null;
@@ -86,21 +112,15 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       return;
     }
 
-    case 'gather': {
-      const nodeId = msg.nodeId;
-      const nodeKind = world.kind.get(nodeId);
-      if (!nodeKind || !isResourceNode(nodeKind)) return;
-      const node = world.transform.get(nodeId)!;
-      for (const id of msg.unitIds) {
-        if (world.owner.get(id) !== playerId) continue;
-        const g = world.gatherer.get(id);
-        if (!g) continue; // only villagers gather
-        g.state = 'toNode';
-        g.nodeId = nodeId;
-        const cs = world.combat.get(id);
-        if (cs) cs.targetId = null;
-        setMoveTarget(world, id, node.x, node.y);
-      }
+    case 'assignJob': {
+      const p = world.players.get(playerId);
+      if (!p) return;
+      const job = msg.job;
+      if (job === 'builder' || !NON_BUILDER_JOBS.includes(job)) return; // builder is the remainder
+      const count = Math.max(0, Math.min(999, Math.floor(msg.count)));
+      p.jobDesired[job] = count;
+      world.markPlayerDirty(playerId);
+      // The jobs system reconciles assignments to the new target next tick.
       return;
     }
 
@@ -113,20 +133,30 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         return session.reject('out of bounds');
       if (!world.footprintFree(tileX, tileY, stat.footprint))
         return session.reject('space is occupied');
+      // Territory rule: you may only build inside your tribe's territory. Town
+      // centers are the exception — they only need to TOUCH it (so you can push
+      // the frontier outward). With no territory at all (lost every TC), only a
+      // new town center is allowed, anywhere, to recover.
+      const sources = territorySources(world, playerId);
+      if (sources.length > 0) {
+        const ok = kind === 'townCenter'
+          ? footprintTouchesTerritory(sources, tileX, tileY, stat.footprint)
+          : footprintInTerritory(sources, tileX, tileY, stat.footprint);
+        if (!ok)
+          return session.reject(
+            kind === 'townCenter'
+              ? 'town centers must touch your territory'
+              : 'must build inside your territory',
+          );
+      } else if (kind !== 'townCenter') {
+        return session.reject('build a town center first');
+      }
       const s = world.players.get(playerId)!.stockpile;
       if (!canAfford(s, stat.cost)) return session.reject('not enough resources');
       pay(world, playerId, stat.cost);
-      const buildingId = spawnBuilding(world, kind, playerId, tileX, tileY, true);
-      // Send builders to walk to the site (construction auto-progresses).
-      const c = world.transform.get(buildingId)!;
-      for (const id of msg.builderIds) {
-        if (world.owner.get(id) !== playerId || !world.gatherer.has(id)) continue;
-        const g = world.gatherer.get(id)!;
-        g.state = 'building';
-        g.nodeId = null;
-        g.buildTargetId = buildingId;
-        setMoveTarget(world, id, c.x, c.y + stat.footprint * TILE);
-      }
+      // The foundation is placed; the kingdom's idle "builder" villagers will be
+      // auto-tasked to it by the jobs system (no manual builder assignment).
+      spawnBuilding(world, kind, playerId, tileX, tileY, true);
       return;
     }
 
@@ -163,16 +193,80 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       if (!ttf) return;
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
+        // Villagers are job-driven, never hand-commanded (incl. attack).
+        if (world.gatherer.has(id)) continue;
         const cs = world.combat.get(id);
         if (!cs) continue; // non-combatant
         cs.targetId = targetId;
         cs.commanded = true;
-        const g = world.gatherer.get(id);
-        if (g) {
-          g.state = 'idle';
-          g.nodeId = null;
-        }
         setMoveTarget(world, id, ttf.x, ttf.y);
+      }
+      return;
+    }
+
+    case 'rally': {
+      const buildingId = msg.buildingId;
+      if (world.owner.get(buildingId) !== playerId) return;
+      const bKind = world.kind.get(buildingId);
+      if (!bKind || !isBuilding(bKind) || !BUILDING_STATS[bKind].trains) return;
+      if (msg.x == null || msg.y == null) {
+        world.rally.delete(buildingId);
+      } else {
+        world.rally.set(buildingId, { x: clamp(msg.x, 0, MAP_PX), y: clamp(msg.y, 0, MAP_PX) });
+      }
+      world.markDirty(buildingId);
+      return;
+    }
+
+    case 'rename': {
+      const id = msg.buildingId;
+      if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'townCenter') return;
+      const name = (msg.name ?? '').replace(/[<>]/g, '').trim().slice(0, 24);
+      // Secret admin toggle: naming a town center "adminmode" flips admin mode
+      // for the owner instead of actually renaming the building.
+      if (name.toLowerCase() === 'adminmode') {
+        if (world.admin.has(playerId)) {
+          world.admin.delete(playerId);
+          world.adminReveal.delete(playerId);
+        } else {
+          world.admin.add(playerId);
+        }
+        sendAdminState(world, session, playerId);
+        return;
+      }
+      if (name) world.tcName.set(id, name);
+      else world.tcName.delete(id);
+      world.markDirty(id);
+      return;
+    }
+
+    case 'farmReseed': {
+      const id = msg.buildingId;
+      if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'farm') return;
+      world.farmAuto.set(id, !!msg.on);
+      world.markDirty(id);
+      return;
+    }
+
+    case 'admin': {
+      // Re-check the authoritative flag — the client can't grant itself admin.
+      if (!world.admin.has(playerId)) return session.reject('admin mode not enabled');
+      switch (msg.action) {
+        case 'boostResources': {
+          const s = world.players.get(playerId)!.stockpile;
+          s.wood += ADMIN_RESOURCE_BOOST;
+          s.gold += ADMIN_RESOURCE_BOOST;
+          s.food += ADMIN_RESOURCE_BOOST;
+          s.stone += ADMIN_RESOURCE_BOOST;
+          world.markPlayerDirty(playerId);
+          break;
+        }
+        case 'revealFog': {
+          if (world.adminReveal.has(playerId)) world.adminReveal.delete(playerId);
+          else world.adminReveal.add(playerId);
+          sendAdminState(world, session, playerId);
+          break;
+        }
       }
       return;
     }
@@ -180,13 +274,10 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     case 'stop': {
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
+        // Villagers ignore stop — their job drives them.
+        if (world.gatherer.has(id)) continue;
         const mv = world.movement.get(id);
         if (mv) clearMove(mv);
-        const g = world.gatherer.get(id);
-        if (g) {
-          g.state = 'idle';
-          g.nodeId = null;
-        }
         const cs = world.combat.get(id);
         if (cs) {
           cs.targetId = null;

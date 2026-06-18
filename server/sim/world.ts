@@ -2,7 +2,7 @@
 // player registry. Sim systems mutate this; persistence flushes it; snapshots
 // read from it. In-RAM is the source of truth at runtime.
 import type { Action, EntityId, EntityKind, EntityView, PlayerId } from '../../shared/types.js';
-import { MAP_TILES, TILE } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_WATER } from '../../shared/constants.js';
 import {
   BASE_POP_CAP,
   BUILDING_STATS,
@@ -28,6 +28,13 @@ export class World {
   readonly gatherer = new Map<EntityId, Gatherer>();
   readonly construction = new Map<EntityId, Construction>();
   readonly trainQueue = new Map<EntityId, TrainItem[]>();
+  // Production buildings' rally points: trained units walk here on spawn.
+  readonly rally = new Map<EntityId, { x: number; y: number }>();
+  // Town centers' current territory radius (tiles) and player-given name.
+  readonly tcRadius = new Map<EntityId, number>();
+  readonly tcName = new Map<EntityId, string>();
+  // Farms' auto-reseed toggle (absent = default ON).
+  readonly farmAuto = new Map<EntityId, boolean>();
   readonly combat = new Map<EntityId, CombatState>();
   readonly resourceAmount = new Map<EntityId, number>();
 
@@ -38,9 +45,20 @@ export class World {
   // — re-discovered cheaply after a restart.
   readonly discoveredResources = new Map<PlayerId, Set<EntityId>>();
 
+  // Players with admin mode enabled (toggled by renaming a town center to
+  // "adminmode"), and the subset with full-map reveal active. Both in-memory
+  // only — a cheat/debug tool, not persisted; re-enable after a restart.
+  readonly admin = new Set<PlayerId>();
+  readonly adminReveal = new Set<PlayerId>();
+
   // Tile occupancy: count of blockers per tile (buildings, walls, resource
   // nodes). >0 means impassable for pathfinding.
   readonly blocked = new Uint8Array(MAP_TILES * MAP_TILES);
+
+  // Static terrain code per tile (grass/water/bridge — see shared/constants).
+  // Generated once by worldgen, persisted, and shipped to clients. Water is
+  // impassable; bridges are passable like grass (handled in isBlockedTile).
+  readonly terrain = new Uint8Array(MAP_TILES * MAP_TILES);
 
   private nextId = 1;
 
@@ -65,7 +83,15 @@ export class World {
   }
   isBlockedTile(tx: number, ty: number): boolean {
     if (!this.inBounds(tx, ty)) return true;
-    return this.blocked[this.tileIndex(tx, ty)] > 0;
+    const i = this.tileIndex(tx, ty);
+    // Water is impassable terrain; a bridge tile sits over water but is passable
+    // (so it's never treated as water here). Dynamic blockers stack on top.
+    if (this.terrain[i] === TERRAIN_WATER) return true;
+    return this.blocked[i] > 0;
+  }
+  terrainAt(tx: number, ty: number): number {
+    if (!this.inBounds(tx, ty)) return TERRAIN_WATER;
+    return this.terrain[this.tileIndex(tx, ty)];
   }
   private addBlock(tx: number, ty: number, delta: number): void {
     if (!this.inBounds(tx, ty)) return;
@@ -127,6 +153,10 @@ export class World {
     this.gatherer.delete(id);
     this.construction.delete(id);
     this.trainQueue.delete(id);
+    this.rally.delete(id);
+    this.tcRadius.delete(id);
+    this.tcName.delete(id);
+    this.farmAuto.delete(id);
     this.combat.delete(id);
     this.resourceAmount.delete(id);
     this.dirtyEntities.delete(id);
@@ -162,7 +192,29 @@ export class World {
     const q = this.trainQueue.get(id);
     if (q && q.length > 0) {
       const front = q[0];
-      v.train = { pct: front.total > 0 ? 1 - front.timeLeft / front.total : 0, queued: q.length };
+      v.train = {
+        pct: front.total > 0 ? 1 - front.timeLeft / front.total : 0,
+        queued: q.length,
+        items: q.map((it) => it.kind),
+      };
+    }
+    const rp = this.rally.get(id);
+    if (rp) v.rally = { x: rp.x, y: rp.y };
+
+    // Town center territory + name (territory radius drives the border render).
+    if (kind === 'townCenter') {
+      // Round so a continuously-growing radius doesn't emit a delta every tick.
+      v.territory = Math.round((this.tcRadius.get(id) ?? 0) * 10) / 10;
+      const nm = this.tcName.get(id);
+      if (nm) v.name = nm;
+    }
+    // Farm auto-reseed state (shown on the owner's info panel).
+    if (kind === 'farm') v.farmAuto = this.farmAuto.get(id) ?? true;
+
+    // Villager job (shown on the owner's info panel / tooltip).
+    if (kind === 'villager') {
+      const g = this.gatherer.get(id);
+      if (g) v.job = g.job;
     }
 
     // Resource nodes report remaining amount (for the hover tooltip).

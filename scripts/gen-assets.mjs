@@ -254,6 +254,29 @@ function grass() {
   }
   im.save('tile_grass');
 }
+function water() {
+  const im = new Img(32, 32);
+  let seed = 778;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [40, 92, 140]); // deep blue base
+  for (let i = 0; i < 70; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [52, 108, 158] : [34, 80, 126]);
+  // A couple of horizontal wave crests (kept off the tile edges to tile cleanly).
+  for (const wy of [9, 20, 27]) {
+    for (let x = 3; x < 29; x++) im.px(x, wy + Math.round(Math.sin((x + wy) * 0.6) * 1.2), [120, 170, 210], 180);
+  }
+  im.save('tile_water');
+}
+function bridge() {
+  const im = new Img(32, 32);
+  im.rect(0, 0, 32, 32, [120, 82, 44]); // plank wood
+  im.rect(0, 0, 32, 32, [96, 64, 34], 0); // (base)
+  // Plank seams across, plus two support rails along the edges.
+  for (let y = 4; y < 32; y += 6) im.rect(0, y, 32, 2, [80, 52, 26]);
+  im.rect(0, 1, 32, 3, [150, 108, 62]); // top rail highlight
+  im.rect(0, 28, 32, 3, [88, 58, 30]); // bottom rail shade
+  for (let x = 0; x < 32; x += 1) if ((x & 7) === 0) im.rect(x, 0, 1, 32, [100, 68, 36], 120);
+  im.save('tile_bridge');
+}
 function fx(name, draw) {
   const im = new Img(16, 16);
   draw(im);
@@ -307,6 +330,8 @@ gold();
 stone();
 berry();
 grass();
+water();
+bridge();
 
 fx('chop', (im) => { for (const [x, y] of [[6, 6], [9, 5], [7, 9], [10, 9]]) im.rect(x, y, 2, 2, [150, 100, 50]); });
 fx('spark', (im) => { im.line(3, 8, 13, 8, [255, 224, 90], 0); im.line(8, 3, 8, 13, [255, 224, 90], 0); im.circle(8, 8, 2, [255, 245, 180]); });

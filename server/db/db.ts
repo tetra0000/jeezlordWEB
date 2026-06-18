@@ -2,7 +2,7 @@
 // initialises the schema, and exposes prepared statements for auth + persistence.
 import { DatabaseSync } from 'node:sqlite';
 import { initSchema } from './schema.js';
-import type { EntityKind, Stockpile } from '../../shared/types.js';
+import type { EntityKind, Stockpile, VillagerJob } from '../../shared/types.js';
 
 export interface UserRow {
   id: number;
@@ -147,6 +147,16 @@ export class Db {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(playerId, s.wood, s.gold, s.food, s.stone);
+  }
+
+  // Desired villager count per non-builder job (empty for a fresh player).
+  getPlayerJobs(playerId: number): Partial<Record<VillagerJob, number>> {
+    const rows = this.handle
+      .prepare('SELECT job, count FROM player_jobs WHERE player_id = ?')
+      .all(playerId) as Array<{ job: string; count: number }>;
+    const out: Partial<Record<VillagerJob, number>> = {};
+    for (const r of rows) out[r.job as VillagerJob] = r.count;
+    return out;
   }
 
   // --- entities (bulk load for boot) ---------------------------------------

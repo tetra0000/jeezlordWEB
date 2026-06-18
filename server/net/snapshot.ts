@@ -4,12 +4,13 @@
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
 import type { DeltaMsg } from '../../shared/protocol.js';
-import type { EntityId, EntityView, Pop, Stockpile } from '../../shared/types.js';
+import type { EntityId, EntityView, JobReport, Pop, Stockpile } from '../../shared/types.js';
 import type { Session } from './session.js';
 import type { World } from '../sim/world.js';
 import { MAP_TILES, TILE } from '../../shared/constants.js';
 import { isResourceNode } from '../../shared/stats.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
+import { jobReport } from '../sim/systems/jobs.js';
 
 function viewChanged(a: EntityView, b: EntityView): boolean {
   return (
@@ -22,7 +23,14 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.action !== b.action ||
     a.amount !== b.amount ||
     a.train?.pct !== b.train?.pct ||
-    a.train?.queued !== b.train?.queued
+    a.train?.queued !== b.train?.queued ||
+    (a.train?.items ?? []).join(',') !== (b.train?.items ?? []).join(',') ||
+    a.rally?.x !== b.rally?.x ||
+    a.rally?.y !== b.rally?.y ||
+    a.territory !== b.territory ||
+    a.name !== b.name ||
+    a.farmAuto !== b.farmAuto ||
+    a.job !== b.job
   );
 }
 
@@ -33,6 +41,9 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
 // Out-of-vision ENEMY entities are never serialized (the anti-cheat boundary).
 function visibleViews(world: World, playerId: number): Map<EntityId, EntityView> {
   const visTiles = visibleTileSet(world, playerId);
+  // Admin reveal: lift the fog entirely for this player (still the single
+  // enforcement point — we just treat every tile as in-vision below).
+  const reveal = world.adminReveal.has(playerId);
   let discovered = world.discoveredResources.get(playerId);
   if (!discovered) {
     discovered = new Set<EntityId>();
@@ -46,7 +57,7 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
       const tf = world.transform.get(id)!;
       const tx = Math.floor(tf.x / TILE);
       const ty = Math.floor(tf.y / TILE);
-      const inVision = visTiles.has(ty * MAP_TILES + tx);
+      const inVision = reveal || visTiles.has(ty * MAP_TILES + tx);
       if (isResourceNode(world.kind.get(id)!)) {
         // Neutral resource: reveal once discovered, then keep revealing it.
         if (inVision) discovered.add(id);
@@ -56,7 +67,17 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
       }
     }
     const v = world.view(id);
-    if (v) out.set(id, v);
+    if (v) {
+      // Private intel — only the owner sees their own rally points and farm
+      // toggles. Territory radius + town-center names stay public (visible
+      // borders/labels are part of the shared world).
+      if (owner !== playerId) {
+        if (v.rally) delete v.rally;
+        if (v.farmAuto !== undefined) delete v.farmAuto;
+        if (v.job !== undefined) delete v.job;
+      }
+      out.set(id, v);
+    }
   }
   return out;
 }
@@ -107,9 +128,21 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     }
   }
 
-  if (enter.length === 0 && update.length === 0 && leave.length === 0 && !you && !pop) return null;
+  // Villager-jobs summary (counts/caps/idle). Cheap to compute; only sent when
+  // its serialization changes.
+  let jobs: JobReport | undefined;
+  const jr = jobReport(world, playerId);
+  const jrKey = JSON.stringify(jr);
+  if (jrKey !== session.lastJobs) {
+    jobs = jr;
+    session.lastJobs = jrKey;
+  }
+
+  if (enter.length === 0 && update.length === 0 && leave.length === 0 && !you && !pop && !jobs)
+    return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
   if (you) delta.you = you;
   if (pop) delta.pop = pop;
+  if (jobs) delta.jobs = jobs;
   return delta;
 }

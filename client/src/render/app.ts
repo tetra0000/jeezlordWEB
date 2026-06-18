@@ -5,11 +5,13 @@
 import { Application, Container, Graphics } from 'pixi.js';
 import { buildTileLayer } from './tiles.js';
 import { EntityLayer } from './entities.js';
+import { TerritoryLayer } from './territory.js';
 import { Fog } from './fog.js';
 
 export class GameRenderer {
   readonly app = new Application();
   readonly world = new Container(); // camera: position + scale applied here
+  readonly territory = new TerritoryLayer();
   readonly entities = new EntityLayer();
   readonly fog = new Fog();
   readonly selectionBox = new Graphics(); // screen-space overlay
@@ -19,22 +21,30 @@ export class GameRenderer {
     await this.app.init({ resizeTo: window, background: 0x101410, antialias: true });
     document.body.appendChild(this.app.canvas);
     this.app.stage.addChild(this.world);
-    // z-order: tiles < entities < fog.
+    // z-order: tiles < territory < entities < fog.
     this.world.addChild(this.tileHolder);
+    this.world.addChild(this.territory.container);
     this.world.addChild(this.entities.container);
     this.world.addChild(this.fog.container);
     this.app.stage.addChild(this.selectionBox);
   }
 
-  setMap(mapTiles: number, tile: number): void {
+  setMap(mapTiles: number, tile: number, terrain: Uint8Array | null): void {
     this.tileHolder.removeChildren();
-    this.tileHolder.addChild(buildTileLayer(mapTiles, tile));
+    this.tileHolder.addChild(buildTileLayer(mapTiles, tile, terrain));
   }
 
   screenToWorld(sx: number, sy: number): { x: number; y: number } {
     return {
       x: (sx - this.world.x) / this.world.scale.x,
       y: (sy - this.world.y) / this.world.scale.y,
+    };
+  }
+
+  worldToScreen(wx: number, wy: number): { x: number; y: number } {
+    return {
+      x: wx * this.world.scale.x + this.world.x,
+      y: wy * this.world.scale.y + this.world.y,
     };
   }
 

@@ -1,5 +1,6 @@
-// v7 verification: a farm trickles food to the owner over time. Run against a
-// fast-forwarded server (TIME_SCALE=30).
+// Farm verification (AoE2-style): build a farm inside territory, let villagers
+// finish it, then assign them to harvest it and confirm food rises as they haul
+// it to the Town Center. Run against a fast-forwarded server (TIME_SCALE=30).
 import WebSocket from 'ws';
 
 const TILE = 32;
@@ -26,6 +27,7 @@ ws.on('message', (raw) => {
   }
 });
 
+// Find a free 2x2 spot near a point, staying close (within territory ~10 tiles).
 function freeSpot(near) {
   const blocked = new Set();
   for (const e of ents.values()) {
@@ -33,35 +35,43 @@ function freeSpot(near) {
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) blocked.add(`${tx + dx},${ty + dy}`);
   }
   const cx = Math.round(near.x / TILE), cy = Math.round(near.y / TILE);
-  for (let r = 3; r <= 14; r++)
+  for (let r = 3; r <= 8; r++)
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       const tx = cx + dx, ty = cy + dy;
       if (!blocked.has(`${tx},${ty}`) && !blocked.has(`${tx + 1},${ty}`) && !blocked.has(`${tx},${ty + 1}`) && !blocked.has(`${tx + 1},${ty + 1}`))
         return { tileX: tx, tileY: ty };
     }
-  return { tileX: cx, tileY: cy + 12 };
+  return { tileX: cx, tileY: cy + 6 };
 }
 
-let foodBeforeComplete = 0;
+let farmId = -1;
 setTimeout(() => {
   const tc = own('townCenter')[0];
   const { tileX, tileY } = freeSpot(tc);
-  send({ t: 'build', builderIds: own('villager').map((v) => v.id), kind: 'farm', tileX, tileY });
-  console.log('built farm at', tileX, tileY);
+  send({ t: 'build', kind: 'farm', tileX, tileY });
+  console.log('placed farm at', tileX, tileY, '(builder villagers auto-build it)');
 }, 800);
 
-// Once the farm completes: assert it built (before a finite farm can deplete),
-// record the food baseline, then verify food rises from the farm trickle.
+// Once the farm completes, assign a farmer (1 slot per farm) to harvest it.
 let builtOk = false;
+let foodBaseline = 0;
 setTimeout(() => {
   const farms = own('farm');
   builtOk = farms.length >= 1 && farms.every((f) => f.build == null);
-  foodBeforeComplete = Math.floor(stock.food);
   console.log(`${builtOk ? 'PASS' : 'FAIL'}: farm built & complete (${farms.length})`);
-  console.log('food baseline:', foodBeforeComplete);
-}, 5000);
+  if (builtOk) {
+    farmId = farms[0].id;
+    foodBaseline = Math.floor(stock.food);
+    send({ t: 'assignJob', job: 'farmer', count: 1 });
+    console.log('assigned 1 farmer; food baseline', foodBaseline);
+  }
+}, 6000);
+
 setTimeout(() => {
-  const grew = Math.floor(stock.food) > foodBeforeComplete;
-  console.log(`${grew ? 'PASS' : 'FAIL'}: farm produced food ${foodBeforeComplete} -> ${Math.floor(stock.food)}`);
-  process.exit(builtOk && grew ? 0 : 1);
-}, 8000);
+  const farm = ents.get(farmId);
+  const grew = Math.floor(stock.food) > foodBaseline;
+  const depleting = farm && farm.amount != null && farm.amount < 1750;
+  console.log(`${grew ? 'PASS' : 'FAIL'}: food rose from harvest ${foodBaseline} -> ${Math.floor(stock.food)}`);
+  console.log(`${depleting ? 'PASS' : 'FAIL'}: farm store is being consumed (amount=${farm?.amount})`);
+  process.exit(builtOk && grew && depleting ? 0 : 1);
+}, 12000);

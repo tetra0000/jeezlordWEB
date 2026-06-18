@@ -21,6 +21,14 @@ canvas {
   display: none !important;
 }
 
+/* Universal button feedback: a quick press-down + release. */
+button {
+  transition: transform 0.06s ease, filter 0.1s ease, background 0.12s ease;
+}
+button:active {
+  transform: translateY(1px) scale(0.97);
+}
+
 /* Login overlay */
 .overlay {
   position: fixed;
@@ -140,6 +148,29 @@ canvas {
   border-radius: 4px;
 }
 
+#sound-toggle {
+  position: absolute;
+  bottom: 8px;
+  left: 92px;
+  width: 30px;
+  height: 26px;
+  font-size: 14px;
+  line-height: 1;
+  color: #cfe;
+  background: #121712cc;
+  border: 1px solid #3a4a3a;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+#sound-toggle:hover {
+  background: #1c241c;
+}
+#sound-toggle.muted {
+  color: #8a6a6a;
+  border-color: #5a3a3a;
+}
+
 #coords {
   position: absolute;
   top: 10px;
@@ -188,6 +219,221 @@ canvas {
   color: #9ab;
 }
 
+/* Info panel: details of the current selection, sits above the minimap. */
+#info-panel {
+  position: absolute;
+  right: 10px;
+  bottom: 220px;
+  width: 200px;
+  background: #121712e6;
+  border: 1px solid #3a4a3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  pointer-events: auto;
+}
+#info-panel .ip-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #ffe08a;
+}
+#info-panel .ip-sub {
+  color: #9ab;
+  font-size: 12px;
+  margin-top: 2px;
+}
+#info-panel .ip-row {
+  margin-top: 6px;
+  color: #cfe;
+}
+#info-panel .ip-hp {
+  height: 6px;
+  border-radius: 3px;
+  background: #000;
+  margin-top: 6px;
+  overflow: hidden;
+}
+#info-panel .ip-hp > i {
+  display: block;
+  height: 100%;
+}
+#info-panel .ip-label {
+  color: #789;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+}
+#info-panel .ip-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+#info-panel .ip-chip {
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #dfe;
+}
+#info-panel .ip-chip.training {
+  border-color: #ffd24a;
+  color: #ffe9a8;
+}
+#info-panel .ip-trainbar {
+  height: 5px;
+  border-radius: 3px;
+  background: #222;
+  margin-top: 5px;
+  overflow: hidden;
+}
+#info-panel .ip-trainbar > i {
+  display: block;
+  height: 100%;
+  background: #ffd24a;
+}
+#info-panel .ip-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #cfe;
+}
+#info-panel .ip-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 0;
+}
+#info-panel .ip-list li span {
+  color: #9ab;
+}
+#info-panel .ip-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #dfe;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#info-panel .ip-btn:hover {
+  background: #2a362a;
+}
+#info-panel .ip-btn.on {
+  border-color: #6ad06a;
+  color: #cfeecf;
+}
+
+/* Villager panel: bottom-left. Assign how many villagers do each job. */
+#villager-panel {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  width: 220px;
+  background: #121712e6;
+  border: 1px solid #3a4a3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  pointer-events: auto;
+}
+#villager-panel .vp-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #ffe08a;
+  margin-bottom: 4px;
+}
+#villager-panel .vp-warn {
+  color: #ffcf6a;
+  background: #3a2a12;
+  border: 1px solid #6a4a1a;
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 12px;
+  margin: 4px 0 6px;
+}
+#villager-panel .vp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+#villager-panel .vp-name {
+  flex: 1;
+  color: #cfe;
+}
+#villager-panel .vp-name.dim {
+  color: #89a;
+}
+#villager-panel .vp-count {
+  min-width: 42px;
+  text-align: center;
+  color: #dfe;
+  font-variant-numeric: tabular-nums;
+}
+#villager-panel .vp-count.full {
+  color: #ffd24a;
+}
+#villager-panel .vp-btn {
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #dfe;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 15px;
+  padding: 0;
+}
+#villager-panel .vp-btn:hover:not(:disabled) {
+  background: #2a362a;
+}
+#villager-panel .vp-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Admin / cheat panel: sits on the left edge above the villager panel, only
+   visible in admin mode. */
+#admin-panel {
+  position: absolute;
+  left: 10px;
+  bottom: 320px;
+  width: 170px;
+  background: #1a1222e6;
+  border: 1px solid #6a4a8a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  pointer-events: auto;
+}
+#admin-panel .ip-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #e0a8ff;
+}
+#admin-panel .ip-btn {
+  margin-top: 8px;
+  width: 100%;
+  background: #241c2c;
+  border: 1px solid #5a4a6a;
+  color: #efe;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#admin-panel .ip-btn:hover {
+  background: #362a42;
+}
+#admin-panel .ip-btn.on {
+  border-color: #c06ad0;
+  color: #f0cfee;
+}
+
 #hint {
   position: absolute;
   bottom: 10px;
@@ -212,6 +458,24 @@ canvas {
   background: #0a0d0a;
   pointer-events: auto;
   cursor: pointer;
+}
+
+/* Perf readout (top-left). DOM overlay — costs nothing on the canvas. */
+#perf-hud {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 9;
+  pointer-events: none;
+  white-space: pre;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #9fe0a0;
+  background: #0a0d0acc;
+  border: 1px solid #2a3a2a;
+  border-radius: 4px;
+  padding: 4px 8px;
 }
 
 #tooltip {

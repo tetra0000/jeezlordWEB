@@ -1,9 +1,10 @@
-// Verifies the resource/drop-off rework:
-//  - resources stay visible through fog once discovered (AoE memory),
-//  - a resource-specific camp (lumber camp) accepts wood deposits.
-// A scout villager actively hunts (redirecting to new far waypoints) until it
-// discovers a distant resource node, then is recalled so the node is left in
-// fog; we assert it's still sent. Run against TIME_SCALE=30.
+// Verifies the resource/drop-off rework under the v8 job model:
+//  - lumberjacks gather wood and a lumber camp accepts the deposit,
+//  - resources stay visible through fog once discovered (AoE memory).
+// Villagers can no longer be hand-controlled, so the "scout" is a trained
+// infantry unit: it hunts distant waypoints until it discovers a far node, then
+// is recalled so the node falls back into fog; we assert it's still sent.
+// Run against a fast-forwarded server (TIME_SCALE=30).
 import WebSocket from 'ws';
 
 const TILE = 32;
@@ -37,62 +38,95 @@ ws.on('message', (raw) => {
 const results = [];
 const check = (n, cond, extra = '') => { results.push(cond); console.log(`${cond ? 'PASS' : 'FAIL'}: ${n} ${extra}`); };
 
+function freeSpot(near, fp) {
+  const blocked = new Set();
+  for (const e of ents.values()) {
+    const tx = Math.round(e.x / TILE), ty = Math.round(e.y / TILE);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) blocked.add(`${tx + dx},${ty + dy}`);
+  }
+  const free = (tx, ty) => {
+    for (let dy = 0; dy < fp; dy++) for (let dx = 0; dx < fp; dx++) if (blocked.has(`${tx + dx},${ty + dy}`)) return false;
+    return true;
+  };
+  const cx = Math.round(near.x / TILE), cy = Math.round(near.y / TILE);
+  for (let r = 3; r <= 9; r++)
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++)
+      if (free(cx + dx, cy + dy)) return { tileX: cx + dx, tileY: cy + dy };
+  return { tileX: cx, tileY: cy + 6 };
+}
+
 let scoutId = -1;
 let scoutHome = null;
 let farNodeId = -1;
 let wood0 = 0;
 
-// Kick off: gather + build a lumber camp with two villagers near home (wood
-// drop-off), and start the scout hunting with the third.
+// Kick off: assign lumberjacks (gather wood) + drop a lumber camp by a tree, and
+// place a barracks so we can train a scout.
 setTimeout(() => {
   const tc = own('townCenter')[0];
-  const vills = own('villager');
-  scoutId = vills[0].id;
-  scoutHome = { x: vills[0].x, y: vills[0].y };
+  const tree = [...ents.values()].find((e) => e.kind === 'tree' && dist(e, tc) < 300);
+  wood0 = stock.wood;
+  send({ t: 'assignJob', job: 'lumberjack', count: 2 });
+  if (tree) send({ t: 'build', kind: 'lumbercamp', tileX: Math.round(tree.x / TILE) + 1, tileY: Math.round(tree.y / TILE) });
+  const spot = freeSpot(tc, 3);
+  send({ t: 'build', kind: 'barracks', tileX: spot.tileX, tileY: spot.tileY });
+  console.log('assigned lumberjacks; placed lumber camp + barracks');
+}, 800);
 
-  const tree = [...ents.values()].find((e) => e.kind === 'tree' && dist(e, tc) < 250);
-  if (tree) {
-    wood0 = stock.wood;
-    send({ t: 'gather', unitIds: vills.slice(1).map((v) => v.id), nodeId: tree.id });
-    send({ t: 'build', builderIds: [], kind: 'lumbercamp', tileX: Math.round(tree.x / TILE) + 1, tileY: Math.round(tree.y / TILE) });
+// Once the barracks is up, train an infantry scout.
+let trained = false;
+const trainTimer = setInterval(() => {
+  if (trained) return;
+  const b = own('barracks')[0];
+  if (b && b.build == null) {
+    trained = true;
+    send({ t: 'train', buildingId: b.id, unit: 'infantry' });
+    console.log('barracks done; training infantry scout');
   }
-  hunt();
-}, 700);
+}, 1000);
 
-// Redirect the scout to fresh far waypoints until a distant node is discovered.
-const tcPos = () => own('townCenter')[0];
+// When the scout exists, send it hunting far waypoints until it finds a distant
+// node, then recall it so the node is left in fog.
 let hopSeed = 1;
-function hunt() {
-  const tc = tcPos();
+const huntTimer = setInterval(() => {
+  const tc = own('townCenter')[0];
   if (!tc) return;
+  if (scoutId < 0) {
+    const inf = own('infantry')[0];
+    if (!inf) return;
+    scoutId = inf.id;
+    scoutHome = { x: inf.x, y: inf.y };
+    console.log('scout spawned', scoutId);
+  }
   if (farNodeId < 0) {
     const far = [...ents.values()].find((e) => e.owner == null && e.amount != null && dist(e, tc) > FAR);
     if (far) {
       farNodeId = far.id;
       console.log('discovered far node', farNodeId, 'dist', Math.round(dist(far, tc)));
       send({ t: 'move', unitIds: [scoutId], x: scoutHome.x, y: scoutHome.y }); // recall
+      clearInterval(huntTimer);
       return;
     }
-    // Explore a new pseudo-random far point.
     hopSeed = (hopSeed * 1103515245 + 12345) & 0x7fffffff;
     const ang = (hopSeed % 360) * (Math.PI / 180);
     send({ t: 'move', unitIds: [scoutId], x: clampPx(tc.x + Math.cos(ang) * 1600), y: clampPx(tc.y + Math.sin(ang) * 1600) });
-    setTimeout(hunt, 4000); // allow time to travel (units move 5x slower now)
   }
-}
+}, 3500);
 
 // Final assertions.
 setTimeout(() => {
+  clearInterval(trainTimer);
+  clearInterval(huntTimer);
   const far = ents.get(farNodeId);
   const ownUnits = [...ents.values()].filter((e) => e.owner === pid);
   const minToOwn = far ? Math.min(...ownUnits.map((u) => dist(far, u))) : 0;
+  check('lumberjacks gathered + deposited wood', stock.wood > wood0, `${wood0} -> ${stock.wood}`);
+  check('lumber camp built (wood drop-off)', own('lumbercamp').length >= 1, `camps=${own('lumbercamp').length}`);
   check('discovered a distant node while scouting', farNodeId > 0);
   check('far node still sent through fog (persisted + out of vision)',
     far != null && minToOwn > VIS, far ? `nearest own unit ${Math.round(minToOwn)}px` : 'gone');
-  check('lumber camp built (wood drop-off)', own('lumbercamp').length >= 1, `camps=${own('lumbercamp').length}`);
-  check('wood gathered + deposited', stock.wood > wood0, `${wood0} -> ${stock.wood}`);
 
   const failed = results.filter((c) => !c).length;
   console.log(`\n${failed === 0 ? 'ALL PASS' : failed + ' FAILED'} (${results.length} checks)`);
   process.exit(failed === 0 ? 0 : 1);
-}, 30000);
+}, 45000);

@@ -59,13 +59,22 @@ export function initSchema(db: DatabaseSync): void {
       target_y  REAL
     );
 
-    -- Villager gathering state.
+    -- Villager gathering state (incl. the assigned job since v8).
     CREATE TABLE IF NOT EXISTS ent_gather (
       entity_id  INTEGER PRIMARY KEY,
       state      TEXT NOT NULL,
       carrying   REAL NOT NULL,
       carry_type TEXT,
-      node_id    INTEGER
+      node_id    INTEGER,
+      job        TEXT NOT NULL DEFAULT 'builder'
+    );
+
+    -- Per-player desired villager count for each non-builder job (v8).
+    CREATE TABLE IF NOT EXISTS player_jobs (
+      player_id INTEGER NOT NULL,
+      job       TEXT NOT NULL,
+      count     INTEGER NOT NULL,
+      PRIMARY KEY (player_id, job)
     );
 
     -- Building construction progress.
@@ -82,6 +91,22 @@ export function initSchema(db: DatabaseSync): void {
       queue_json TEXT NOT NULL
     );
 
+    -- Production building rally point (where trained units walk on spawn).
+    CREATE TABLE IF NOT EXISTS ent_rally (
+      entity_id INTEGER PRIMARY KEY,
+      x         REAL NOT NULL,
+      y         REAL NOT NULL
+    );
+
+    -- Per-building extras: town-center name + territory radius, farm reseed flag.
+    -- Columns are nullable; which apply depends on the building kind.
+    CREATE TABLE IF NOT EXISTS ent_building_meta (
+      entity_id INTEGER PRIMARY KEY,
+      name      TEXT,
+      radius    REAL,
+      farm_auto INTEGER
+    );
+
     -- Remaining harvestable amount for resource nodes.
     CREATE TABLE IF NOT EXISTS resource_nodes (
       entity_id INTEGER PRIMARY KEY,
@@ -93,6 +118,13 @@ export function initSchema(db: DatabaseSync): void {
       v TEXT NOT NULL
     );
   `);
+
+  // v8 migration: add ent_gather.job to databases created before villager jobs.
+  // (CREATE TABLE IF NOT EXISTS won't add a column to an existing table.)
+  const gatherCols = db.prepare(`PRAGMA table_info(ent_gather)`).all() as Array<{ name: string }>;
+  if (!gatherCols.some((c) => c.name === 'job')) {
+    db.exec(`ALTER TABLE ent_gather ADD COLUMN job TEXT NOT NULL DEFAULT 'builder'`);
+  }
 
   // Stamp / verify schema version.
   const row = db

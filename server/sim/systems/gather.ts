@@ -3,26 +3,49 @@
 // Runs regardless of whether the owner is online.
 import { TILE } from '../../../shared/constants.js';
 import {
+  BUILDING_STATS,
   CARRY_CAPACITY,
   GATHER_RATE,
   RESOURCE_NODE_STATS,
   acceptsResource,
+  isBuilding,
 } from '../../../shared/stats.js';
 import type { EntityId, PlayerId, ResourceType } from '../../../shared/types.js';
 import type { World } from '../world.js';
 import { clearMove, setMoveTarget } from './movement.js';
 
-// Villagers must stand right beside the resource tile to harvest: covers an
-// orthogonally-adjacent tile (~32px centre-to-centre) and a diagonal one (~45px,
-// for trees only reachable at a corner) but not a full tile away.
-const GATHER_RANGE = TILE * 1.5;
-const DEPOSIT_RANGE = TILE * 3.0;
-const BUILD_RANGE = TILE * 3.0;
+// A villager must stand within half a tile of the worked tile/building to act on
+// it (harvest, deposit, or build). Tighter than before — they have to be right
+// up against it, not a tile away.
+const WORK_GAP = TILE * 0.5;
 
-function near(world: World, id: EntityId, x: number, y: number, range: number): boolean {
-  const tf = world.transform.get(id);
-  if (!tf) return false;
-  return Math.hypot(tf.x - x, tf.y - y) <= range;
+// Footprint (in tiles) of anything a villager works at: resource nodes are 1x1,
+// buildings come from the stat table.
+function footprintOf(world: World, id: EntityId): number {
+  const k = world.kind.get(id);
+  if (k && isBuilding(k)) return BUILDING_STATS[k].footprint;
+  return 1;
+}
+
+// True when the villager is within WORK_GAP of the target's footprint (measured
+// to the nearest edge of the footprint box). A pathfinder that can only reach a
+// diagonal tile beside a fully-surrounded target would otherwise sit just out of
+// reach, so 8-tile-adjacency to the footprint also counts (anti-stuck).
+export function nearTarget(world: World, vid: EntityId, targetId: EntityId): boolean {
+  const tf = world.transform.get(vid);
+  const tt = world.transform.get(targetId);
+  if (!tf || !tt) return false;
+  const f = footprintOf(world, targetId);
+  const half = (f * TILE) / 2;
+  const dx = Math.max(0, Math.abs(tf.x - tt.x) - half);
+  const dy = Math.max(0, Math.abs(tf.y - tt.y) - half);
+  if (Math.hypot(dx, dy) <= WORK_GAP + 1) return true;
+  // Tile-adjacency fallback.
+  const x0 = Math.round(tt.x / TILE - f / 2);
+  const y0 = Math.round(tt.y / TILE - f / 2);
+  const vx = Math.floor(tf.x / TILE);
+  const vy = Math.floor(tf.y / TILE);
+  return vx >= x0 - 1 && vx <= x0 + f && vy >= y0 - 1 && vy <= y0 + f;
 }
 
 // Nearest owned, operational building that accepts the given resource type.
@@ -82,8 +105,7 @@ export function gatherSystem(world: World, dt: number): void {
           world.markDirty(id);
           break;
         }
-        const b = world.transform.get(bId)!;
-        if (near(world, id, b.x, b.y, BUILD_RANGE)) {
+        if (nearTarget(world, id, bId)) {
           const mv = world.movement.get(id);
           if (mv && mv.target) clearMove(mv);
         }
@@ -95,8 +117,7 @@ export function gatherSystem(world: World, dt: number): void {
           g.state = g.carrying > 0 ? 'toDrop' : 'idle';
           break;
         }
-        const node = world.transform.get(g.nodeId)!;
-        if (near(world, id, node.x, node.y, GATHER_RANGE)) {
+        if (nearTarget(world, id, g.nodeId)) {
           g.state = 'gathering';
           const mv = world.movement.get(id);
           if (mv) clearMove(mv);
@@ -110,19 +131,27 @@ export function gatherSystem(world: World, dt: number): void {
           break;
         }
         const nodeKind = world.kind.get(g.nodeId)!;
-        g.carryType = RESOURCE_NODE_STATS[nodeKind].resource;
+        // Farms are owned buildings, not resource nodes, but villagers harvest
+        // food from them the same way (then they reseed instead of vanishing).
+        const isFarm = nodeKind === 'farm';
+        g.carryType = isFarm ? 'food' : RESOURCE_NODE_STATS[nodeKind].resource;
         const amount = world.resourceAmount.get(g.nodeId) ?? 0;
-        const take = Math.min(GATHER_RATE * dt, CARRY_CAPACITY - g.carrying, amount);
+        const take = Math.min(GATHER_RATE * dt, CARRY_CAPACITY - g.carrying, Math.max(0, amount));
         g.carrying += take;
         world.resourceAmount.set(g.nodeId, amount - take);
         world.markDirty(g.nodeId);
         world.markDirty(id);
 
-        if (amount - take <= 0.001) {
-          removeResourceNode(world, g.nodeId);
+        const depleted = amount - take <= 0.001;
+        if (depleted && !isFarm) {
+          removeResourceNode(world, g.nodeId); // a tree/mine/bush is consumed
           g.nodeId = null;
         }
-        if (g.carrying >= CARRY_CAPACITY - 0.001 || g.nodeId == null) {
+        // A depleted farm persists (the farmSystem reseeds it); the villager
+        // hauls what it has, then either returns or waits for the reseed.
+        const sourceEmpty = isFarm && depleted;
+
+        if (g.carrying >= CARRY_CAPACITY - 0.001 || g.nodeId == null || sourceEmpty) {
           const drop = g.carryType ? nearestDropSite(world, owner, g.carryType, tf.x, tf.y) : null;
           if (drop != null && g.carrying > 0) {
             g.state = 'toDrop';
@@ -130,6 +159,15 @@ export function gatherSystem(world: World, dt: number): void {
             setMoveTarget(world, id, d.x, d.y);
           } else if (g.nodeId == null) {
             g.state = 'idle';
+          } else if (sourceEmpty && g.carrying === 0) {
+            // Empty-handed at an empty farm: give up unless it will auto-reseed.
+            if (!(world.farmAuto.get(g.nodeId) ?? true)) {
+              g.state = 'idle';
+              g.nodeId = null;
+              const mv = world.movement.get(id);
+              if (mv) clearMove(mv);
+            }
+            // else: keep standing here, waiting for the reseed.
           }
         }
         break;
@@ -140,8 +178,7 @@ export function gatherSystem(world: World, dt: number): void {
         if (drop == null) {
           break; // nowhere to deposit this resource type; hold
         }
-        const d = world.transform.get(drop)!;
-        if (near(world, id, d.x, d.y, DEPOSIT_RANGE)) {
+        if (nearTarget(world, id, drop)) {
           const p = world.players.get(owner);
           if (p && g.carryType) {
             p.stockpile[g.carryType] += Math.round(g.carrying);

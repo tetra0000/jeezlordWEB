@@ -35,6 +35,19 @@ export type EntityKind =
 
 export type ResourceType = 'wood' | 'gold' | 'food' | 'stone';
 
+// Villager jobs. Villagers are no longer hand-controlled — the player assigns
+// jobs and the sim auto-tasks each villager. "builder" is the default (assists
+// any unbuilt foundation inside the kingdom's territory); the rest gather a
+// specific resource within a host building's radius (or, for farmers, work a
+// single farm). See server/sim/systems/jobs.ts.
+export type VillagerJob =
+  | 'builder'
+  | 'farmer'
+  | 'forager'
+  | 'lumberjack'
+  | 'stonemason'
+  | 'goldminer';
+
 export interface Stockpile {
   wood: number;
   gold: number;
@@ -63,12 +76,31 @@ export interface EntityView {
   hp: number;
   maxHp: number;
   build?: number; // construction progress 0..1 (present only while building)
-  train?: { pct: number; queued: number }; // military building training status
+  // Production building training status: front-item progress, queue length, and
+  // the ordered kinds in the queue (so the client can show the full queue).
+  train?: { pct: number; queued: number; items: EntityKind[] };
+  rally?: Vec2; // production building rally point (sent to the owner only)
   action?: Action; // units: current activity (omitted when idle)
-  amount?: number; // resource nodes: harvestable amount remaining
+  amount?: number; // resource nodes / farms: harvestable amount remaining
+  territory?: number; // town centers: current territory radius in tiles
+  name?: string; // town centers: player-given name
+  farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
+  job?: VillagerJob; // villagers: current job (sent to the owner only)
 }
 
 export interface Pop {
   used: number;
   cap: number;
+}
+
+// Per-player villager-jobs summary (sent to the owner only, in the delta).
+// `counts` is how many villagers are on each job right now (builder included);
+// `caps` is the capacity for each non-builder job (how many the kingdom can
+// support); `idleLong` is how many villagers have had nothing to do for a long
+// time (drives the "idle villagers" warning).
+export interface JobReport {
+  total: number;
+  counts: Record<VillagerJob, number>;
+  caps: Partial<Record<VillagerJob, number>>;
+  idleLong: number;
 }

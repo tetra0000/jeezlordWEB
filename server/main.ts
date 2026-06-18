@@ -61,6 +61,8 @@ function main(): void {
   // One-time world generation on a fresh world.
   if (db.getMeta('seeded') !== '1') {
     seedWorld(world);
+    // Persist the static terrain grid as a base64 blob (written once).
+    db.setMeta('terrain', Buffer.from(world.terrain).toString('base64'));
     db.setMeta('seeded', '1');
     flush(db, world);
   }

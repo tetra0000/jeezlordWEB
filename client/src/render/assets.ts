@@ -14,7 +14,11 @@ const FX = ['chop', 'spark', 'dust', 'leaf', 'slash'];
 export const tex: Record<string, Texture> = {};
 
 export async function loadAssets(): Promise<void> {
-  const manifest: Record<string, string> = { tile_grass: 'assets/tile_grass.png' };
+  const manifest: Record<string, string> = {
+    tile_grass: 'assets/tile_grass.png',
+    tile_water: 'assets/tile_water.png',
+    tile_bridge: 'assets/tile_bridge.png',
+  };
   for (const k of ENTITY_KINDS) manifest[k] = `assets/${k}.png`;
   for (const f of FX) manifest['fx_' + f] = `assets/fx_${f}.png`;
 

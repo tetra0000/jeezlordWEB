@@ -35,14 +35,16 @@ ws.on('message', (raw) => {
     for (const e of msg.update) entities.set(e.id, e);
     for (const id of msg.leave) entities.delete(id);
 
+    // Villagers are no longer hand-controlled — assign a lumberjack job and
+    // confirm a villager walks off toward a tree (movement via deltas).
     if (firstUnit < 0) {
       for (const [id, e] of entities) {
-        if (e.owner === playerId) {
+        if (e.owner === playerId && e.kind === 'villager') {
           firstUnit = id;
           startPos = { x: e.x, y: e.y };
-          movedTo = { x: e.x + 300, y: e.y + 200 };
-          console.log(`own units: ${[...entities.values()].filter((v) => v.owner === playerId).length}; moving unit ${id} from (${e.x.toFixed(0)},${e.y.toFixed(0)}) to (${movedTo.x.toFixed(0)},${movedTo.y.toFixed(0)})`);
-          send({ t: 'move', unitIds: [id], x: movedTo.x, y: movedTo.y });
+          movedTo = startPos;
+          console.log(`own units: ${[...entities.values()].filter((v) => v.owner === playerId).length}; assigning lumberjacks (villager ${id} at (${e.x.toFixed(0)},${e.y.toFixed(0)}) should walk to a tree)`);
+          send({ t: 'assignJob', job: 'lumberjack', count: 2 });
           break;
         }
       }
@@ -50,23 +52,27 @@ ws.on('message', (raw) => {
   }
 });
 
-// After ~3.5s, report where the moved unit ended up.
+// After a few seconds, report whether any villager walked off to work. (Use the
+// max displacement across villagers — the tracked one may stay a builder.)
 setTimeout(() => {
-  const e = entities.get(firstUnit);
-  if (!e) {
-    console.error('FAIL: unit vanished');
+  const vills = [...entities.values()].filter((v) => v.owner === playerId && v.kind === 'villager');
+  if (vills.length === 0) {
+    console.error('FAIL: no villagers');
     process.exit(1);
   }
-  const movedDist = Math.hypot(e.x - startPos.x, e.y - startPos.y);
-  console.log(`unit now at (${e.x.toFixed(0)},${e.y.toFixed(0)}); moved ${movedDist.toFixed(0)}px`);
+  // Villagers all start clustered by the TC, so distance from the tracked
+  // villager's start approximates each one's displacement; take the max (the
+  // lumberjacks walk off, even if the tracked one stayed a builder).
+  const movedDist = Math.max(...vills.map((v) => Math.hypot(v.x - startPos.x, v.y - startPos.y)));
+  console.log(`furthest villager moved ${movedDist.toFixed(0)}px`);
   if (movedDist > 50) {
     console.log('PASS: movement applied via authoritative deltas');
     process.exit(0);
   } else {
-    console.error('FAIL: unit did not move');
+    console.error('FAIL: villager did not move (no tree in range, or movement broken)');
     process.exit(1);
   }
-}, 3500);
+}, 6000);
 
 ws.on('error', (e) => {
   console.error('ws error', e.message);

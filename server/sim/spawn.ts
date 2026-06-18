@@ -6,6 +6,8 @@ import {
   BUILDING_STATS,
   FARM_FOOD,
   RESOURCE_NODE_STATS,
+  TERRITORY_MIN_TILES,
+  buildTimeOf,
   combatOf,
   isResourceNode,
   maxHpOf,
@@ -32,7 +34,7 @@ export function spawnUnit(
   });
   if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
   if (kind === 'villager')
-    world.gatherer.set(id, { state: 'idle', carrying: 0, carryType: null, nodeId: null });
+    world.gatherer.set(id, { state: 'idle', carrying: 0, carryType: null, nodeId: null, job: 'builder', idleTime: 0 });
   return id;
 }
 
@@ -53,13 +55,15 @@ export function spawnBuilding(
   const hp = stat.hp;
   const id = world.spawn(kind, owner, c.x, c.y, hp, hp);
   world.blockFootprint(tileX, tileY, stat.footprint);
+  const buildTime = buildTimeOf(kind);
   world.construction.set(id, {
-    buildTime: stat.buildTime,
-    elapsed: underConstruction ? 0 : stat.buildTime,
+    buildTime,
+    elapsed: underConstruction ? 0 : buildTime,
     complete: !underConstruction,
   });
   if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
   if (stat.trains) world.trainQueue.set(id, []);
+  if (kind === 'townCenter') world.tcRadius.set(id, TERRITORY_MIN_TILES);
   if (kind === 'farm') world.resourceAmount.set(id, FARM_FOOD);
   return id;
 }

@@ -5,6 +5,7 @@ import { TILE } from '../../../shared/constants.js';
 import { BUILDING_STATS } from '../../../shared/stats.js';
 import type { World } from '../world.js';
 import { spawnUnit } from '../spawn.js';
+import { setMoveTarget } from './movement.js';
 
 function spawnPointFor(world: World, buildingId: number): { x: number; y: number } {
   const tf = world.transform.get(buildingId)!;
@@ -27,7 +28,10 @@ export function trainingSystem(world: World, dt: number): void {
     if (front.timeLeft <= 0) {
       queue.shift();
       const p = spawnPointFor(world, id);
-      spawnUnit(world, front.kind, owner, p.x, p.y);
+      const unitId = spawnUnit(world, front.kind, owner, p.x, p.y);
+      // Walk the fresh unit to the building's rally point, if one is set.
+      const rp = world.rally.get(id);
+      if (rp) setMoveTarget(world, unitId, rp.x, rp.y);
     }
   }
 }

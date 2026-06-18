@@ -45,14 +45,15 @@ ws.on('message', (raw) => {
 });
 
 setTimeout(() => {
-  const tree = [...ents.values()].find((e) => e.kind === 'tree');
-  send({ t: 'gather', unitIds: own('villager').map((v) => v.id), nodeId: tree.id });
+  // Assign lumberjacks (they walk to a tree -> move + gatherWood actions),
+  // leaving a builder to raise the house (-> build action).
+  send({ t: 'assignJob', job: 'lumberjack', count: 2 });
 }, 700);
 
 setTimeout(() => {
   const tc = own('townCenter')[0];
   const { tileX, tileY } = freeSpot(tc);
-  send({ t: 'build', builderIds: own('villager').map((v) => v.id), kind: 'house', tileX, tileY });
+  send({ t: 'build', kind: 'house', tileX, tileY });
 }, 4500);
 
 setTimeout(() => {

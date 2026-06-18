@@ -2,16 +2,62 @@
 // and the per-frame update loop (camera + entity interpolation + fog + minimap
 // + HUD).
 import { MAP_PX } from '../../shared/constants.js';
-import type { ServerMsg } from '../../shared/protocol.js';
+import { decodeTerrainRLE } from '../../shared/terrain.js';
+import { isBuilding, isResourceNode } from '../../shared/stats.js';
+import type { DeltaMsg, ServerMsg } from '../../shared/protocol.js';
 import { ClientState } from './state.js';
 import { Net } from './net.js';
 import { GameRenderer } from './render/app.js';
 import { loadAssets } from './render/assets.js';
 import { Minimap } from './render/minimap.js';
+import { PerfHud } from './render/perfHud.js';
 import { Camera } from './input/camera.js';
 import { Input } from './input/commands.js';
+import { sound, panAt, vary } from './audio/sound.js';
 
 const $ = (id: string) => document.getElementById(id)!;
+
+// Turn a world delta into audible/visible events by diffing against the state
+// we still hold (call this BEFORE applyDelta overwrites it):
+//  - hp drop on a visible unit/building -> combat impact
+//  - an owned entity leaving -> destroyed (enemy leaves can just be fog, skip)
+//  - an owned foundation finishing (build: number -> undefined) -> completion
+function emitDeltaSounds(state: ClientState, msg: DeltaMsg, r: GameRenderer): void {
+  const me = state.playerId;
+  const onScreen = (sx: number, sy: number): boolean =>
+    sx >= -60 && sx <= window.innerWidth + 60 && sy >= -60 && sy <= window.innerHeight + 60;
+
+  for (const v of msg.update) {
+    const old = state.entities.get(v.id);
+    if (!old) continue;
+    const ov = old.view;
+    const sp = r.worldToScreen(v.x, v.y);
+    const vis = onScreen(sp.x, sp.y);
+
+    if (ov.build != null && v.build == null && v.owner === me && isBuilding(v.kind)) {
+      if (vis) {
+        sound.play('complete', { pan: panAt(sp.x) });
+        r.entities.completeFx(v.x, v.y);
+      } else {
+        sound.play('complete');
+      }
+      continue;
+    }
+    if (v.hp < ov.hp - 0.01 && !isResourceNode(v.kind) && vis) {
+      sound.play('hit', { pan: panAt(sp.x), rate: vary(0.25) });
+      r.entities.hitFx(v.x, v.y);
+    }
+  }
+
+  for (const id of msg.leave) {
+    const old = state.entities.get(id);
+    if (!old || old.view.owner !== me || isResourceNode(old.view.kind)) continue;
+    const sp = r.worldToScreen(old.view.x, old.view.y);
+    const vis = onScreen(sp.x, sp.y);
+    sound.play('death', { pan: vis ? panAt(sp.x) : 0, rate: vary(0.25) });
+    if (vis) r.entities.deathFx(old.view.x, old.view.y);
+  }
+}
 
 async function boot(): Promise<void> {
   const loginOverlay = $('login');
@@ -41,6 +87,7 @@ async function boot(): Promise<void> {
         loginOverlay.classList.add('hidden');
         hud.classList.remove('hidden');
         errorEl.textContent = '';
+        sound.play('complete');
         break;
       case 'reject':
         if (state.playerId < 0) {
@@ -50,6 +97,7 @@ async function boot(): Promise<void> {
         } else {
           input?.showToast(msg.reason);
         }
+        sound.play('error');
         break;
       case 'init':
         state.playerId = msg.playerId;
@@ -57,15 +105,24 @@ async function boot(): Promise<void> {
         state.tile = msg.tile;
         state.stockpile = msg.stockpile;
         state.pop = msg.pop;
+        state.terrain = decodeTerrainRLE(msg.terrain, msg.mapTiles * msg.mapTiles);
         state.reset();
         centered = false;
-        renderer.setMap(msg.mapTiles, msg.tile);
+        renderer.setMap(msg.mapTiles, msg.tile, state.terrain);
         camera.centerOn(MAP_PX / 2, MAP_PX / 2);
         break;
       case 'delta':
+        emitDeltaSounds(state, msg, renderer);
         state.applyDelta(msg);
         if (msg.you) Object.assign(state.stockpile, msg.you);
         if (msg.pop) state.pop = msg.pop;
+        break;
+      case 'adminState':
+        state.adminEnabled = msg.enabled;
+        state.adminReveal = msg.reveal;
+        input?.showToast(
+          msg.enabled ? `admin mode ON${msg.reveal ? ' · fog revealed' : ''}` : 'admin mode OFF',
+        );
         break;
     }
   };
@@ -80,6 +137,7 @@ async function boot(): Promise<void> {
 
   input = new Input(renderer, state, net);
   const minimap = new Minimap(renderer, state, (wx, wy) => camera.centerOn(wx, wy));
+  const perf = new PerfHud();
 
   loginForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -89,15 +147,51 @@ async function boot(): Promise<void> {
     net.send({ t: 'register', username: usernameEl.value, password: passwordEl.value });
   });
 
+  // Sound mute toggle (button + 'M' key).
+  const soundBtn = $('sound-toggle');
+  const refreshSoundBtn = (): void => {
+    soundBtn.textContent = sound.muted ? '🔇' : '🔊';
+    soundBtn.classList.toggle('muted', sound.muted);
+  };
+  refreshSoundBtn();
+  soundBtn.addEventListener('click', () => {
+    sound.toggleMute();
+    refreshSoundBtn();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'm' || e.key === 'M') {
+      const muted = sound.toggleMute();
+      refreshSoundBtn();
+      input?.showToast(muted ? 'sound off' : 'sound on');
+    }
+  });
+
   net.connect();
 
   let minimapAccum = 0;
+  let overlayAccum = 1000; // force fog/territory to draw on the first frame
   renderer.app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
     camera.update(dt);
     renderer.entities.frame(state, dt);
-    renderer.fog.update(state);
+
+    // Fog + territory barely change frame-to-frame and each rebuild their
+    // Graphics geometry over a full scan of the world, so refresh them at ~20 Hz
+    // instead of every frame. Panning/zoom still tracks at full rate (it's a
+    // container transform; only the redraw is throttled).
+    overlayAccum += ticker.deltaMS;
+    if (overlayAccum >= 50) {
+      overlayAccum = 0;
+      renderer.territory.draw(state);
+      renderer.fog.update(state);
+    }
+
     input.update();
+    perf.frame(ticker.deltaMS, {
+      entities: state.entities.size,
+      sprites: renderer.entities.spriteCount,
+      fx: renderer.entities.fxCount,
+    });
 
     if (!centered) {
       for (const [, e] of state.entities) {

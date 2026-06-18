@@ -1,6 +1,15 @@
 // All WebSocket message shapes, shared by client and server so they never drift.
 // Discriminated unions on the `t` field. Pure data — no Node/DOM APIs.
-import type { EntityId, EntityKind, EntityView, PlayerId, Pop, Stockpile } from './types.js';
+import type {
+  EntityId,
+  EntityKind,
+  EntityView,
+  JobReport,
+  PlayerId,
+  Pop,
+  Stockpile,
+  VillagerJob,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Client -> Server
@@ -24,7 +33,9 @@ export interface ResumeMsg {
   token: string;
 }
 
-// Order one or more owned units to move to a world position (off-grid target).
+// Order one or more owned MILITARY units to move to a world position. Villagers
+// are no longer hand-controlled (they follow their assigned job) and the server
+// ignores them here.
 export interface MoveMsg {
   t: 'move';
   unitIds: EntityId[];
@@ -32,20 +43,23 @@ export interface MoveMsg {
   y: number;
 }
 
-// Send villagers to harvest a resource node.
-export interface GatherMsg {
-  t: 'gather';
-  unitIds: EntityId[];
-  nodeId: EntityId;
-}
-
-// Place a building (server validates cost, free tiles, ownership).
+// Place a building (server validates cost, free tiles, ownership). Construction
+// is then carried out automatically by the kingdom's idle "builder" villagers —
+// there is no longer a manual builder assignment.
 export interface BuildMsg {
   t: 'build';
-  builderIds: EntityId[];
   kind: EntityKind;
   tileX: number;
   tileY: number;
+}
+
+// Set how many villagers the kingdom should put on a given job. The remainder
+// are builders. The server clamps to the job's capacity and reconciles which
+// villagers are doing what.
+export interface AssignJobMsg {
+  t: 'assignJob';
+  job: VillagerJob;
+  count: number;
 }
 
 // Enqueue a unit at a military/production building.
@@ -62,10 +76,43 @@ export interface AttackMsg {
   targetId: EntityId;
 }
 
-// Clear orders (stop moving / gathering / attacking).
+// Set (or clear, when x/y omitted) a production building's rally point. Units
+// trained there walk to it on spawn. Server validates ownership + that the
+// building trains.
+export interface RallyMsg {
+  t: 'rally';
+  buildingId: EntityId;
+  x?: number;
+  y?: number;
+}
+
+// Rename an owned town center.
+export interface RenameMsg {
+  t: 'rename';
+  buildingId: EntityId;
+  name: string;
+}
+
+// Toggle a farm's auto-reseed behaviour.
+export interface FarmReseedMsg {
+  t: 'farmReseed';
+  buildingId: EntityId;
+  on: boolean;
+}
+
+// Clear orders for military units (stop moving / attacking). Villagers ignore
+// this — their job drives them.
 export interface StopMsg {
   t: 'stop';
   unitIds: EntityId[];
+}
+
+// Admin/cheat actions. Only honoured for a player who has enabled admin mode
+// (by renaming one of their town centers to "adminmode"). Server re-checks the
+// flag before applying — the message alone grants nothing.
+export interface AdminMsg {
+  t: 'admin';
+  action: 'boostResources' | 'revealFog';
 }
 
 export type ClientMsg =
@@ -73,11 +120,15 @@ export type ClientMsg =
   | LoginMsg
   | ResumeMsg
   | MoveMsg
-  | GatherMsg
   | BuildMsg
+  | AssignJobMsg
   | TrainMsg
   | AttackMsg
-  | StopMsg;
+  | RallyMsg
+  | RenameMsg
+  | FarmReseedMsg
+  | StopMsg
+  | AdminMsg;
 
 // ---------------------------------------------------------------------------
 // Server -> Client
@@ -105,6 +156,9 @@ export interface InitMsg {
   tile: number;
   stockpile: Stockpile;
   pop: Pop;
+  // Static terrain grid, run-length encoded (see shared/terrain.ts). Decodes to
+  // mapTiles*mapTiles bytes of terrain codes for client rendering + minimap.
+  terrain: number[];
 }
 
 // Per-tick world delta. In v0 `enter`/`update`/`leave` cover all entities the
@@ -117,9 +171,18 @@ export interface DeltaMsg {
   leave: EntityId[]; // entities that left vision or died
   you?: Partial<Stockpile>; // your stockpile changes
   pop?: Pop; // your population used/cap
+  jobs?: JobReport; // your villager-jobs summary (sent when it changes)
 }
 
-export type ServerMsg = AuthOkMsg | RejectMsg | InitMsg | DeltaMsg;
+// Admin-mode state for the local player (whether the cheat panel is active, and
+// whether full-map reveal is currently on). Sent whenever it changes.
+export interface AdminStateMsg {
+  t: 'adminState';
+  enabled: boolean;
+  reveal: boolean;
+}
+
+export type ServerMsg = AuthOkMsg | RejectMsg | InitMsg | DeltaMsg | AdminStateMsg;
 
 // ---------------------------------------------------------------------------
 // Helpers

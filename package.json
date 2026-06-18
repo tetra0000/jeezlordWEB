@@ -16,7 +16,9 @@
     "watch:client": "node scripts/build-client.mjs --watch",
     "typecheck:client": "tsc -p tsconfig.client.json",
     "start": "node dist/server/main.js",
-    "dev": "npm run build && npm run start"
+    "dev": "npm run build && npm run start",
+    "reset": "node scripts/reset-world.mjs",
+    "reset:dev": "npm run reset && npm run dev"
   },
   "dependencies": {
     "pixi.js": "^8.6.6",

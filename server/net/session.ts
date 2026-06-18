@@ -4,7 +4,8 @@
 import type { WebSocket } from 'ws';
 import { encode, type ServerMsg } from '../../shared/protocol.js';
 import type { EntityId, EntityView, PlayerId, Pop, Stockpile } from '../../shared/types.js';
-import { MAP_TILES, TILE } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_GRASS } from '../../shared/constants.js';
+import { encodeTerrainRLE } from '../../shared/terrain.js';
 import { BUILDING_STATS } from '../../shared/stats.js';
 import type { Db } from '../db/db.js';
 import type { World } from '../sim/world.js';
@@ -29,6 +30,7 @@ export class Session {
   readonly lastSent = new Map<EntityId, EntityView>();
   lastStockpile: Stockpile = { wood: -1, gold: -1, food: -1, stone: -1 };
   lastPop: Pop = { used: -1, cap: -1 };
+  lastJobs = '';
 
   constructor(readonly ws: WebSocket) {}
 
@@ -52,8 +54,19 @@ function now(): number {
 const MIN_SPAWN_DIST = 200; // tiles
 const SPAWN_EDGE_MARGIN = 14; // keep clear of the map border
 
-// Pick a spawn tile >= MIN_SPAWN_DIST from every existing player's spawn. Random
-// sampling with a best-effort fallback (max-min distance) if the map is crowded.
+// A spawn needs open ground: the whole starting area (town center footprint plus
+// the cleared resource ring) must be dry grass, well away from any river.
+const SPAWN_DRY_RADIUS = 7; // tiles around the spawn that must be water-free
+function spawnAreaDry(world: World, x: number, y: number): boolean {
+  for (let dy = -SPAWN_DRY_RADIUS; dy <= SPAWN_DRY_RADIUS; dy++)
+    for (let dx = -SPAWN_DRY_RADIUS; dx <= SPAWN_DRY_RADIUS; dx++)
+      if (world.terrainAt(x + dx, y + dy) !== TERRAIN_GRASS) return false;
+  return true;
+}
+
+// Pick a spawn tile >= MIN_SPAWN_DIST from every existing player's spawn, on dry
+// land. Random sampling with a best-effort fallback (max-min distance) if the
+// map is crowded; the fallback still prefers dry candidates.
 function findSpawnTile(world: World): { x: number; y: number } {
   const existing = [...world.players.values()].map((p) => ({ x: p.spawnTileX, y: p.spawnTileY }));
   const lo = SPAWN_EDGE_MARGIN;
@@ -63,6 +76,7 @@ function findSpawnTile(world: World): { x: number; y: number } {
   for (let i = 0; i < 600; i++) {
     const x = lo + Math.floor(Math.random() * (hi - lo));
     const y = lo + Math.floor(Math.random() * (hi - lo));
+    if (!spawnAreaDry(world, x, y)) continue;
     if (existing.length === 0) return { x, y };
     let minD = Infinity;
     for (const e of existing) minD = Math.min(minD, Math.hypot(x - e.x, y - e.y));
@@ -135,6 +149,7 @@ function ensurePlayer(ctx: GameContext, userId: number, username: string): Playe
       spawnTileX: spawn.x,
       spawnTileY: spawn.y,
       stockpile: { ...STARTING_STOCKPILE },
+      jobDesired: {},
     });
     setupNewPlayer(ctx.world, playerId, spawn.x, spawn.y);
     return playerId;
@@ -148,6 +163,7 @@ function ensurePlayer(ctx: GameContext, userId: number, username: string): Playe
       spawnTileX: row.spawn_tile_x,
       spawnTileY: row.spawn_tile_y,
       stockpile: { ...sp },
+      jobDesired: ctx.db.getPlayerJobs(row.id),
     });
   }
   return row.id;
@@ -182,9 +198,20 @@ function bind(ctx: GameContext, session: Session, userId: number, token: string)
     tile: TILE,
     stockpile: { ...p.stockpile },
     pop,
+    terrain: encodeTerrainRLE(ctx.world.terrain),
   });
   session.lastStockpile = { ...p.stockpile };
   session.lastPop = { ...pop };
+
+  // Admin mode is in-memory on the server and survives reconnects — re-sync the
+  // client so its cheat panel / fog reveal come back after a refresh.
+  if (ctx.world.admin.has(playerId)) {
+    session.send({
+      t: 'adminState',
+      enabled: true,
+      reveal: ctx.world.adminReveal.has(playerId),
+    });
+  }
 }
 
 export function handleRegister(ctx: GameContext, session: Session, username: string, password: string): void {
