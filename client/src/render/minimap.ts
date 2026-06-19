@@ -86,6 +86,7 @@ export class Minimap {
     }
 
     for (const e of this.state.entities.values()) {
+      if (e.view.kind === 'corpse') continue; // corpses don't clutter the minimap
       const own = e.view.owner === this.state.playerId;
       if (isResourceNode(e.view.kind)) {
         ctx.fillStyle = '#3a5a30';

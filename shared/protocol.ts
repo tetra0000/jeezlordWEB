@@ -7,9 +7,19 @@ import type {
   JobReport,
   PlayerId,
   Pop,
+  ResourceType,
   Stockpile,
   VillagerJob,
 } from './types.js';
+
+// Live (global) market price multipliers per tradable commodity, baseline 1.0.
+// The client derives the displayed buy/sell prices from these + the shared
+// price constants.
+export interface MarketState {
+  wood: number;
+  food: number;
+  stone: number;
+}
 
 // ---------------------------------------------------------------------------
 // Client -> Server
@@ -115,6 +125,24 @@ export interface DeleteMsg {
   unitIds: EntityId[];
 }
 
+// Restart after defeat (0 units left): wipe the player's remaining state and
+// re-seed them at a fresh spawn. Server re-validates that they're actually
+// defeated before honouring it.
+export interface RestartMsg {
+  t: 'restart';
+}
+
+// Trade at a market: buy a resource with gold, or sell it for gold. `resource`
+// is one of the tradable commodities (wood/food/stone — never gold). `amount`
+// defaults to MARKET_TRADE_UNIT. Server validates the player owns a market,
+// re-prices from the live (global) market, and re-checks affordability.
+export interface MarketMsg {
+  t: 'market';
+  action: 'buy' | 'sell';
+  resource: ResourceType;
+  amount?: number;
+}
+
 // Admin/cheat actions. Only honoured for a player who has enabled admin mode
 // (by renaming one of their town centers to "adminmode"). Server re-checks the
 // flag before applying — the message alone grants nothing.
@@ -137,6 +165,8 @@ export type ClientMsg =
   | FarmReseedMsg
   | StopMsg
   | DeleteMsg
+  | RestartMsg
+  | MarketMsg
   | AdminMsg;
 
 // ---------------------------------------------------------------------------
@@ -178,9 +208,15 @@ export interface DeltaMsg {
   enter: EntityView[]; // newly visible entities (full state)
   update: EntityView[]; // still-visible entities that changed
   leave: EntityId[]; // entities that left vision or died
+  // The subset of `leave` that actually DIED (removed from the world) rather than
+  // merely leaving the player's vision — units/buildings only, never resource
+  // nodes. Drives death FX and the lingering corpse animation client-side.
+  dead?: EntityId[];
   you?: Partial<Stockpile>; // your stockpile changes
   pop?: Pop; // your population used/cap
   jobs?: JobReport; // your villager-jobs summary (sent when it changes)
+  market?: MarketState; // global market price multipliers (sent when they change)
+  defeated?: boolean; // you have no units left (sent when this flips) — offer restart
 }
 
 // Admin-mode state for the local player (whether the cheat panel is active, and

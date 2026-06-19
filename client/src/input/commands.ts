@@ -4,18 +4,26 @@
 //    else -> move. Right-click also cancels placement.
 //  - The command panel (DOM) shows Build buttons when villagers are selected and
 //    Train buttons when an owned production building is selected.
-import { Graphics } from 'pixi.js';
+import { Graphics, Text } from 'pixi.js';
 import { TILE } from '../../../shared/constants.js';
 import {
   BUILDING_STATS,
+  MARKET_TRADABLE,
+  MARKET_TRADE_UNIT,
   NON_BUILDER_JOBS,
+  PLACE_ANYWHERE_KINDS,
+  TERRITORY_MAX_TILES,
+  TERRITORY_MIN_TILES,
   UNIT_STATS,
   costOf,
   isBuilding,
   isUnit,
+  marketBuyTotal,
+  marketSellTotal,
+  townCenterCost,
 } from '../../../shared/stats.js';
 import type { Cost } from '../../../shared/stats.js';
-import type { VillagerJob } from '../../../shared/types.js';
+import type { ResourceType, VillagerJob } from '../../../shared/types.js';
 import {
   footprintInTerritory,
   footprintTouchesTerritory,
@@ -31,11 +39,11 @@ import { sound, panAt } from '../audio/sound.js';
 const DRAG_THRESHOLD = 5;
 const BUILDABLE: EntityKind[] = [
   'townCenter', 'house', 'mill', 'lumbercamp', 'miningcamp',
-  'farm', 'barracks', 'range', 'stable', 'tower', 'wall',
+  'farm', 'market', 'barracks', 'range', 'stable', 'tower', 'wall',
 ];
 const LABEL: Record<string, string> = {
   townCenter: 'Town Center', house: 'House', mill: 'Mill', lumbercamp: 'Lumber Camp',
-  miningcamp: 'Mining Camp', farm: 'Farm', barracks: 'Barracks', range: 'Archery', stable: 'Stable',
+  miningcamp: 'Mining Camp', farm: 'Farm', market: 'Market', barracks: 'Barracks', range: 'Archery', stable: 'Stable',
   tower: 'Tower', wall: 'Wall', villager: 'Villager', infantry: 'Infantry', archer: 'Archer',
   scout: 'Scout', cavalry: 'Cavalry', horse: 'Knight', catapult: 'Catapult',
   tree: 'Tree', gold: 'Gold Mine', stone: 'Stone', berry: 'Berry Bush',
@@ -47,9 +55,10 @@ const DESC: Record<string, string> = {
   townCenter: 'Your base: trains Villagers, accepts every resource, gives population, vision and territory.',
   house: 'Raises your population cap so you can support more units.',
   mill: 'Food drop-off and forage camp: adds Forager capacity and a gather area; farms/berries deposit here.',
-  lumbercamp: 'Wood drop-off: place by trees to add Lumberjack capacity and a new gather area.',
-  miningcamp: 'Gold & stone drop-off: place by mines to add Miner capacity and a new gather area.',
+  lumbercamp: 'Wood drop-off: adds Lumberjack capacity and a 15-tile harvest radius — lumberjacks chop any trees within it. (Not territory; units don’t heal here.)',
+  miningcamp: 'Gold & stone drop-off: adds Miner capacity and a 15-tile harvest radius — miners work any gold/stone within it. (Not territory; units don’t heal here.)',
   farm: 'Grows food; one Farmer works it. Auto-reseeds with wood when empty (toggle in its panel).',
+  market: 'Trade wood/food/stone for gold and back. Select it to open the trade panel; prices shift with trade and drift back to baseline over an hour.',
   barracks: 'Trains Infantry and Catapults.',
   range: 'Trains Archers.',
   stable: 'Trains Scouts, Cavalry and Knights.',
@@ -65,6 +74,7 @@ const DESC: Record<string, string> = {
   catapult: 'Slow siege engine: huge damage, devastating against buildings.',
 };
 const RES_TYPE: Record<string, string> = { tree: 'wood', gold: 'gold', stone: 'stone', berry: 'food' };
+const MK_EMOJI: Record<string, string> = { wood: '🌲', food: '🍖', stone: '🪨' };
 const ACTION_LABEL: Record<string, string> = {
   move: 'moving', attack: 'fighting', build: 'building', gatherWood: 'chopping wood',
   gatherGold: 'mining gold', gatherStone: 'mining stone', gatherFood: 'foraging',
@@ -98,6 +108,13 @@ export class Input {
   private shift = false;
   private pendingBuild: EntityKind | null = null;
   private readonly ghost = new Graphics();
+  // World-space label shown above the ghost while placing a Town Center: its
+  // distance-scaled cost (TCs get pricier the further they sit from your nearest
+  // existing one).
+  private readonly ghostLabel = new Text({
+    text: '',
+    style: { fontSize: 13, fill: 0xffffff, fontFamily: 'system-ui, sans-serif', stroke: { color: 0x000000, width: 3 }, align: 'center' },
+  });
   private readonly panel = document.getElementById('command-panel')!;
   private readonly villagerEl = document.getElementById('villager-panel')!;
   private readonly adminEl = document.getElementById('admin-panel')!;
@@ -126,6 +143,9 @@ export class Input {
   ) {
     r.world.addChild(this.ghost);
     this.ghost.visible = false;
+    this.ghostLabel.anchor.set(0.5, 1);
+    this.ghostLabel.visible = false;
+    r.world.addChild(this.ghostLabel);
     const canvas = r.app.canvas;
 
     window.addEventListener('keydown', (e) => {
@@ -345,6 +365,7 @@ export class Input {
   cancelPlacement(): void {
     this.pendingBuild = null;
     this.ghost.visible = false;
+    this.ghostLabel.visible = false;
     this.refreshPanel(true);
   }
 
@@ -369,34 +390,86 @@ export class Input {
     return out;
   }
 
+  // Enemy territory — you may never build inside it (mirrors the server rule).
+  private enemyTerritorySources(): TerritorySource[] {
+    const out: TerritorySource[] = [];
+    for (const e of this.state.entities.values()) {
+      const v = e.view;
+      if (v.kind === 'townCenter' && v.owner != null && v.owner !== this.state.playerId && v.territory)
+        out.push({ x: v.x, y: v.y, radiusTiles: v.territory });
+    }
+    return out;
+  }
+
+  // Distance (tiles) from a world point to your nearest town center, for pricing
+  // a new TC. Infinity if you have none.
+  private nearestOwnTcDistTiles(x: number, y: number): number {
+    let best = Infinity;
+    for (const e of this.state.entities.values()) {
+      const v = e.view;
+      if (v.kind === 'townCenter' && v.owner === this.state.playerId)
+        best = Math.min(best, Math.hypot(v.x - x, v.y - y) / TILE);
+    }
+    return best;
+  }
+
   private placementValid(tileX: number, tileY: number, kind: EntityKind): boolean {
     const f = BUILDING_STATS[kind].footprint;
+    // Never inside enemy territory.
+    if (footprintTouchesTerritory(this.enemyTerritorySources(), tileX, tileY, f)) return false;
+    // TCs / camps go anywhere else; everything else needs your own territory.
+    if (PLACE_ANYWHERE_KINDS.includes(kind)) return true;
     const sources = this.territorySources();
-    if (sources.length === 0) return kind === 'townCenter'; // recovery: only a TC
-    return kind === 'townCenter'
-      ? footprintTouchesTerritory(sources, tileX, tileY, f)
-      : footprintInTerritory(sources, tileX, tileY, f);
+    if (sources.length === 0) return false;
+    return footprintInTerritory(sources, tileX, tileY, f);
   }
 
   private updateGhost(cx: number, cy: number): void {
     if (!this.pendingBuild) return;
     const { tileX, tileY, f } = this.ghostTile(cx, cy);
     const ok = this.placementValid(tileX, tileY, this.pendingBuild);
+    const cx2 = (tileX + f / 2) * TILE;
+    const cy2 = (tileY + f / 2) * TILE;
     this.ghost.clear()
       .rect(tileX * TILE, tileY * TILE, f * TILE, f * TILE)
       .fill({ color: ok ? 0x6ad06a : 0xd06a6a, alpha: 0.35 })
       .stroke({ width: 2, color: ok ? 0x9af09a : 0xf09a9a });
+    // Town center: preview the territory it would gain (its starting border —
+    // the border then grows on its own up to the max, it does not snap there).
+    if (this.pendingBuild === 'townCenter') {
+      this.ghost.circle(cx2, cy2, TERRITORY_MIN_TILES * TILE)
+        .fill({ color: 0x6ad0a0, alpha: 0.06 })
+        .stroke({ width: 2, color: 0x8af0c0, alpha: 0.7 });
+    }
+    // Gather camps (lumber/mining/mill) preview their harvest radius — the area
+    // within which their gatherers work nodes. (The Town Center shows territory
+    // instead, above.) This is NOT territory: units don't heal inside it.
+    const stat = BUILDING_STATS[this.pendingBuild];
+    if (this.pendingBuild !== 'townCenter' && stat.gatherRadius) {
+      this.ghost.circle(cx2, cy2, stat.gatherRadius * TILE)
+        .fill({ color: 0xffcf6a, alpha: 0.05 })
+        .stroke({ width: 1.5, color: 0xffd98a, alpha: 0.6 });
+    }
     // Defensive buildings (towers) preview their attack radius so the player can
     // see the coverage before committing the placement.
-    const stat = BUILDING_STATS[this.pendingBuild];
     if (stat.attack != null && stat.range) {
-      const cx2 = (tileX + f / 2) * TILE;
-      const cy2 = (tileY + f / 2) * TILE;
       this.ghost.circle(cx2, cy2, stat.range)
         .fill({ color: 0xff6a4a, alpha: 0.05 })
         .stroke({ width: 1.5, color: 0xff8a5a, alpha: 0.5 });
     }
     this.ghost.visible = true;
+
+    // Town center cost grows with distance from your nearest TC — show the live
+    // price above the ghost so the player sees what this spot will cost.
+    if (this.pendingBuild === 'townCenter') {
+      const cost = townCenterCost(this.nearestOwnTcDistTiles(cx2, cy2));
+      this.ghostLabel.text = costStr(cost);
+      this.ghostLabel.x = cx2;
+      this.ghostLabel.y = tileY * TILE - 6;
+      this.ghostLabel.visible = true;
+    } else {
+      this.ghostLabel.visible = false;
+    }
   }
 
   private placeBuilding(cx: number, cy: number): void {
@@ -564,6 +637,19 @@ export class Input {
         this.net.send({ t: 'farmReseed', buildingId: id, on: !cur });
       });
     }
+    // Market buy/sell buttons (sell gives gold for the resource; buy spends gold).
+    for (const btn of this.infoEl.querySelectorAll('.mk-buy')) {
+      btn.addEventListener('click', () => {
+        const res = (btn as HTMLElement).dataset.res as ResourceType;
+        this.net.send({ t: 'market', action: 'buy', resource: res, amount: MARKET_TRADE_UNIT });
+      });
+    }
+    for (const btn of this.infoEl.querySelectorAll('.mk-sell')) {
+      btn.addEventListener('click', () => {
+        const res = (btn as HTMLElement).dataset.res as ResourceType;
+        this.net.send({ t: 'market', action: 'sell', resource: res, amount: MARKET_TRADE_UNIT });
+      });
+    }
   }
 
   // --- in-game rename dialog ------------------------------------------------
@@ -636,10 +722,15 @@ export class Input {
       parts.push(`<div class="ip-row">🧰 job: ${jobName}</div>`);
     }
 
+    // Gather camp: its harvest radius (where its gatherers work). Not territory —
+    // units don't heal inside it. (Town centers show territory instead, below.)
+    if (v.kind !== 'townCenter' && isBuilding(v.kind) && BUILDING_STATS[v.kind].gatherRadius)
+      parts.push(`<div class="ip-row">⛏ harvest radius: ${BUILDING_STATS[v.kind].gatherRadius} tiles</div>`);
+
     // Town center: territory size + rename control.
     if (v.kind === 'townCenter') {
       if (v.territory != null)
-        parts.push(`<div class="ip-row">🏳 territory: ${v.territory.toFixed(1)} / 15 tiles</div>`);
+        parts.push(`<div class="ip-row">🏳 territory: ${v.territory.toFixed(1)} / ${TERRITORY_MAX_TILES} tiles (max)</div>`);
       if (owned) parts.push(`<button id="ip-rename" class="ip-btn">✎ Rename</button>`);
     }
 
@@ -652,6 +743,28 @@ export class Input {
           `<button id="ip-farm-toggle" class="ip-btn${on ? ' on' : ''}">` +
           `Auto-reseed: ${on ? 'ON' : 'OFF'}</button>`,
         );
+      }
+    }
+
+    // Market: a trade desk — buy/sell each commodity for gold at live prices.
+    if (v.kind === 'market' && owned) {
+      parts.push(`<div class="ip-label">Market — trade ${MARKET_TRADE_UNIT} at a time</div>`);
+      const mkt = this.state.market;
+      if (!mkt) {
+        parts.push(`<div class="ip-row dim">prices loading…</div>`);
+      } else {
+        for (const res of MARKET_TRADABLE) {
+          const mult = mkt[res as 'wood' | 'food' | 'stone'];
+          const buy = marketBuyTotal(res, mult, MARKET_TRADE_UNIT);
+          const sell = marketSellTotal(res, mult, MARKET_TRADE_UNIT);
+          parts.push(
+            `<div class="mk-row">` +
+            `<span class="mk-res">${MK_EMOJI[res] ?? res}</span>` +
+            `<button class="mk-btn mk-buy" data-res="${res}">Buy 🪙${buy}</button>` +
+            `<button class="mk-btn mk-sell" data-res="${res}">Sell 🪙${sell}</button>` +
+            `</div>`,
+          );
+        }
       }
     }
 

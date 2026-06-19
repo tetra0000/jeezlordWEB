@@ -14,7 +14,7 @@ import {
   isUnit,
   speedOf,
 } from '../../shared/stats.js';
-import type { ResourceType, VillagerJob } from '../../shared/types.js';
+import type { EntityKind, ResourceType, VillagerJob } from '../../shared/types.js';
 import type { Db } from './db.js';
 import { World } from '../sim/world.js';
 import type { TrainItem } from '../sim/components.js';
@@ -65,6 +65,10 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT entity_id, amount FROM resource_nodes').all() as Array<{ entity_id: number; amount: number }>)
     resourceById.set(r.entity_id, r.amount);
 
+  const corpseById = new Map<number, { unit_kind: string; team: number | null; age: number }>();
+  for (const c of h.prepare('SELECT entity_id, unit_kind, team, age FROM ent_corpse').all() as Array<{ entity_id: number; unit_kind: string; team: number | null; age: number }>)
+    corpseById.set(c.entity_id, c);
+
   for (const e of db.allEntities()) {
     const { id, kind, owner_player_id: owner, x, y, hp, max_hp } = e;
     world.insert(id, kind, owner, x, y, hp, max_hp);
@@ -113,11 +117,25 @@ export function loadWorld(db: Db, world: World): void {
       const ty = Math.floor(y / TILE);
       world.blockFootprint(tx, ty, 1);
       world.resourceAmount.set(id, resourceById.get(id) ?? RESOURCE_NODE_STATS[kind].amount);
+    } else if (kind === 'corpse') {
+      const c = corpseById.get(id);
+      // No blocking / components — a corpse is just a decaying marker. The decay
+      // system removes it once age reaches CORPSE_TTL_S.
+      world.corpses.set(id, {
+        unitKind: (c?.unit_kind as EntityKind) ?? 'villager',
+        team: c?.team ?? null,
+        age: c?.age ?? 0,
+      });
     }
   }
 
   const stored = db.getMeta('next_entity_id');
   if (stored) world.setNextId(Number(stored));
+
+  // Restore the global market price multipliers (default to baseline 1.0).
+  const mw = db.getMeta('market_wood'); if (mw) world.market.wood = Number(mw);
+  const mf = db.getMeta('market_food'); if (mf) world.market.food = Number(mf);
+  const ms = db.getMeta('market_stone'); if (ms) world.market.stone = Number(ms);
 
   // Static terrain grid (base64 raw bytes, written once by worldgen). Absent on
   // a brand-new world — seedWorld fills it before the first persist.

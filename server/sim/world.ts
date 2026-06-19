@@ -6,6 +6,7 @@ import { MAP_TILES, TILE, TERRAIN_WATER, TERRAIN_MOUNTAIN } from '../../shared/c
 import {
   BASE_POP_CAP,
   BUILDING_STATS,
+  CORPSE_TTL_S,
   UNIT_STATS,
   isBuilding,
   isUnit,
@@ -13,6 +14,7 @@ import {
 import type {
   CombatState,
   Construction,
+  Corpse,
   Gatherer,
   Movement,
   PlayerState,
@@ -37,8 +39,15 @@ export class World {
   readonly farmAuto = new Map<EntityId, boolean>();
   readonly combat = new Map<EntityId, CombatState>();
   readonly resourceAmount = new Map<EntityId, number>();
+  // Dead units' bodies (kind === 'corpse'): decorative, neutral, decaying.
+  readonly corpses = new Map<EntityId, Corpse>();
 
   readonly players = new Map<PlayerId, PlayerState>();
+
+  // Global market price multipliers per tradable commodity (baseline 1.0). A
+  // shared economy: trades move these, and marketSystem drifts them back toward
+  // 1.0. Persisted in world_meta.
+  readonly market = { wood: 1, food: 1, stone: 1 };
 
   // Resource nodes each player has discovered (entered vision once). Discovered
   // nodes stay visible through fog (AoE-style "explored" memory). In-memory only
@@ -161,6 +170,7 @@ export class World {
     this.farmAuto.delete(id);
     this.combat.delete(id);
     this.resourceAmount.delete(id);
+    this.corpses.delete(id);
     this.dirtyEntities.delete(id);
     this.removedEntities.add(id);
   }
@@ -223,6 +233,16 @@ export class World {
       if (g) v.job = g.job;
     }
 
+    // Corpse: the original unit kind (sprite), its team (tint), and decay. Fade
+    // is quantised so a slowly-decaying corpse doesn't emit a delta every tick.
+    if (kind === 'corpse') {
+      const cp = this.corpses.get(id);
+      if (cp) {
+        const fade = Math.max(0, 1 - cp.age / CORPSE_TTL_S);
+        v.corpse = { kind: cp.unitKind, team: cp.team, fade: Math.round(fade * 50) / 50 };
+      }
+    }
+
     // Resource nodes report remaining amount (for the hover tooltip).
     const amt = this.resourceAmount.get(id);
     if (amt != null && amt < 100000) v.amount = Math.ceil(amt);
@@ -272,6 +292,21 @@ export class World {
   isOperational(id: EntityId): boolean {
     const c = this.construction.get(id);
     return !c || c.complete;
+  }
+
+  // Whether a player is still in the game: owns at least one unit, or has one
+  // queued in training. (Training keeps a player who lost their last villager
+  // mid-build alive until it pops, avoiding a false defeat flicker.)
+  isAlive(playerId: PlayerId): boolean {
+    for (const [id, owner] of this.owner) {
+      if (owner !== playerId) continue;
+      const k = this.kind.get(id);
+      if (k && isUnit(k)) return true;
+    }
+    for (const [id, q] of this.trainQueue) {
+      if (q.length > 0 && this.owner.get(id) === playerId) return true;
+    }
+    return false;
   }
 
   // --- population -----------------------------------------------------------

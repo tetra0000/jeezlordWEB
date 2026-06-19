@@ -5,8 +5,8 @@
 // effect particles. Positions interpolate toward the authoritative target.
 import { Container, Graphics, Point, Sprite, Text } from 'pixi.js';
 import { TILE } from '../../../shared/constants.js';
-import { BUILDING_STATS, isBuilding, isResourceNode } from '../../../shared/stats.js';
-import type { Action, EntityId, EntityKind } from '../../../shared/types.js';
+import { BUILDING_STATS, TERRITORY_MAX_TILES, isBuilding, isResourceNode } from '../../../shared/stats.js';
+import type { Action, EntityId, EntityKind, PlayerId } from '../../../shared/types.js';
 import type { ClientState } from '../state.js';
 import { ownerColor } from './colors.js';
 import { tex } from './assets.js';
@@ -79,9 +79,25 @@ const Z_UNIT = 3;
 const Z_PATH = 4; // planned move path, drawn over units so it stays visible
 
 function zIndexFor(kind: EntityKind): number {
+  if (kind === 'corpse') return Z_RESOURCE; // on the ground, under the living
   if (isResourceNode(kind)) return Z_RESOURCE;
   if (isBuilding(kind)) return Z_BUILDING;
   return Z_UNIT;
+}
+
+// A corpse's colour: the dead unit's team tint, blended most of the way toward
+// grey so it reads as a faded body but you can still tell whose it was. Neutral
+// (no team) corpses are plain grey.
+function corpseTint(team: PlayerId | null): number {
+  const grey = 0x6f6f6f;
+  if (team == null) return grey;
+  const c = ownerColor(team);
+  const mix = (shift: number): number => {
+    const cc = (c >> shift) & 0xff;
+    const gg = (grey >> shift) & 0xff;
+    return Math.round(gg * 0.65 + cc * 0.35);
+  };
+  return (mix(16) << 16) | (mix(8) << 8) | mix(0);
 }
 
 // Which fx sprite + cadence each work action uses.
@@ -110,6 +126,8 @@ export class EntityLayer {
   private readonly fxLayer = new Container();
   private readonly rallyG = new Graphics(); // rally flags for selected buildings
   private readonly rangeG = new Graphics(); // attack radius of selected towers
+  private readonly gatherG = new Graphics(); // harvest radius of selected gather camps
+  private readonly territoryG = new Graphics(); // max-growth border of selected town centers
   private readonly pathG = new Graphics(); // planned move paths for selected units
   private readonly sprites = new Map<EntityId, Sprite_>();
   private readonly effects: Effect[] = [];
@@ -125,10 +143,14 @@ export class EntityLayer {
     this.fxLayer.zIndex = Z_GROUND;
     this.rallyG.zIndex = Z_GROUND;
     this.rangeG.zIndex = Z_GROUND;
+    this.gatherG.zIndex = Z_GROUND;
+    this.territoryG.zIndex = Z_GROUND;
     this.pathG.zIndex = Z_PATH;
     this.container.addChild(this.fxLayer);
     this.container.addChild(this.rallyG);
     this.container.addChild(this.rangeG);
+    this.container.addChild(this.gatherG);
+    this.container.addChild(this.territoryG);
     this.container.addChild(this.pathG);
   }
 
@@ -183,12 +205,48 @@ export class EntityLayer {
     }
   }
 
+  // Draw the harvest radius of every selected gather camp (lumber/mining/mill):
+  // the area within which its gatherers work resource nodes. This is NOT
+  // territory (units don't heal in it); the town center shows territory instead.
+  private drawGatherRadius(state: ClientState): void {
+    const g = this.gatherG;
+    g.clear();
+    for (const id of state.selection) {
+      const e = state.entities.get(id);
+      if (!e || e.view.kind === 'townCenter' || !isBuilding(e.view.kind)) continue;
+      const radius = BUILDING_STATS[e.view.kind].gatherRadius;
+      if (!radius) continue;
+      g.circle(e.rx, e.ry, radius * TILE)
+        .fill({ color: 0xffcf6a, alpha: 0.05 })
+        .stroke({ width: 1.5, color: 0xffd98a, alpha: 0.55 });
+    }
+  }
+
+  // Draw the maximum border every selected town center will grow to (its
+  // territory radius caps at TERRITORY_MAX_TILES), so the player can see how far
+  // the frontier will eventually reach.
+  private drawTerritoryMax(state: ClientState): void {
+    const g = this.territoryG;
+    g.clear();
+    for (const id of state.selection) {
+      const e = state.entities.get(id);
+      if (!e || e.view.kind !== 'townCenter') continue;
+      g.circle(e.rx, e.ry, TERRITORY_MAX_TILES * TILE)
+        .stroke({ width: 2, color: 0x8af0c0, alpha: 0.5 });
+    }
+  }
+
   private create(state: ClientState, id: EntityId): Sprite_ {
     const e = state.entities.get(id)!;
     const kind = e.view.kind;
-    const size = displaySize(kind);
+    // A corpse renders the dead unit's sprite (greyed + flat in frame()), and —
+    // like a resource node — carries none of the live overlays (ring/hp/label).
+    const isCorpse = kind === 'corpse';
+    const texKind = isCorpse ? (e.view.corpse?.kind ?? 'villager') : kind;
+    const size = isCorpse ? UNIT_SIZE : displaySize(kind);
     const half = size / 2;
     const resource = isResourceNode(kind);
+    const minimal = resource || isCorpse; // no selection ring / hp / progress / label
     // The entity may have moved while culled (sprite absent); snap the render
     // position to the authoritative target so it doesn't slide in from a stale
     // spot when it re-enters the viewport.
@@ -205,18 +263,23 @@ export class EntityLayer {
       floor.height = TILE;
       node.addChild(floor);
     }
-    const body = new Sprite(tex[kind]);
+    const body = new Sprite(tex[texKind]);
     body.anchor.set(0.5, 0.5);
     body.width = size;
     body.height = size;
-    if (isBuilding(kind) || !resource) body.tint = ownerColor(e.view.owner);
+    if (isCorpse) {
+      body.tint = corpseTint(e.view.corpse?.team ?? null);
+      body.rotation = Math.PI / 2; // lying down
+    } else if (isBuilding(kind) || !resource) {
+      body.tint = ownerColor(e.view.owner);
+    }
     node.addChild(body);
 
     let ring: Graphics | undefined;
     let hpBg: Graphics | undefined;
     let hpFg: Graphics | undefined;
     let prog: Graphics | undefined;
-    if (!resource) {
+    if (!minimal) {
       ring = new Graphics();
       if (isBuilding(kind)) ring.rect(-half - 2, -half - 2, half * 2 + 4, half * 2 + 4).stroke({ width: 2, color: 0xffffff });
       else ring.circle(0, 0, half + 3).stroke({ width: 2, color: 0xffffff });
@@ -409,6 +472,16 @@ export class EntityLayer {
       s.node.x = e.rx;
       s.node.y = e.ry;
 
+      // Corpse: greyed, lying flat, fading out with its decay. No live overlays
+      // or animation — just track the fade and move on.
+      if (v.kind === 'corpse') {
+        const fade = v.corpse?.fade ?? 1;
+        s.body.rotation = Math.PI / 2;
+        s.body.tint = corpseTint(v.corpse?.team ?? null);
+        s.node.alpha = Math.max(0, 0.9 * fade);
+        continue;
+      }
+
       if (s.ring) s.ring.visible = state.selection.has(id);
 
       const building = e.view.build;
@@ -477,6 +550,8 @@ export class EntityLayer {
 
     this.drawRallyFlags(state);
     this.drawRanges(state);
+    this.drawGatherRadius(state);
+    this.drawTerritoryMax(state);
     this.drawPaths(state);
 
     // Advance + cull effect particles.

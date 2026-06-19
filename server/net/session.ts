@@ -13,6 +13,7 @@ import type { GameLoop } from '../sim/loop.js';
 import { hashPassword, newToken, verifyPassword } from '../auth/password.js';
 import { spawnBuilding, spawnResourceNode, spawnUnit } from '../sim/spawn.js';
 import { removeResourceNode } from '../sim/systems/gather.js';
+import { killEntity } from '../sim/systems/combat.js';
 import type { EntityKind } from '../../shared/types.js';
 
 export interface GameContext {
@@ -31,6 +32,8 @@ export class Session {
   lastStockpile: Stockpile = { wood: -1, gold: -1, food: -1, stone: -1 };
   lastPop: Pop = { used: -1, cap: -1 };
   lastJobs = '';
+  lastMarket = ''; // last market-price key sent (so we only resend on change)
+  lastDefeated = false; // last defeat state sent (sent only when it flips)
 
   constructor(readonly ws: WebSocket) {}
 
@@ -190,20 +193,8 @@ function bind(ctx: GameContext, session: Session, userId: number, token: string)
   session.lastSent.clear();
   ctx.online.set(playerId, session);
 
-  const p = ctx.world.players.get(playerId)!;
-  const pop: Pop = { used: ctx.world.popUsed(playerId), cap: ctx.world.popCap(playerId) };
   session.send({ t: 'authOk', token, playerId, username: user.username });
-  session.send({
-    t: 'init',
-    playerId,
-    mapTiles: MAP_TILES,
-    tile: TILE,
-    stockpile: { ...p.stockpile },
-    pop,
-    terrain: encodeTerrainRLE(ctx.world.terrain),
-  });
-  session.lastStockpile = { ...p.stockpile };
-  session.lastPop = { ...pop };
+  sendInit(ctx, session, playerId);
 
   // Admin mode is in-memory on the server and survives reconnects — re-sync the
   // client so its cheat panel / fog reveal come back after a refresh.
@@ -214,6 +205,53 @@ function bind(ctx: GameContext, session: Session, userId: number, token: string)
       reveal: ctx.world.adminReveal.has(playerId),
     });
   }
+}
+
+// Send the world init (map + the player's stockpile/pop) and reset the session's
+// diff baselines so the next delta re-sends their whole visible set. Used on bind
+// (reconnect) and again on a defeat restart.
+function sendInit(ctx: GameContext, session: Session, playerId: PlayerId): void {
+  const p = ctx.world.players.get(playerId)!;
+  const pop: Pop = { used: ctx.world.popUsed(playerId), cap: ctx.world.popCap(playerId) };
+  session.send({
+    t: 'init',
+    playerId,
+    mapTiles: MAP_TILES,
+    tile: TILE,
+    stockpile: { ...p.stockpile },
+    pop,
+    terrain: encodeTerrainRLE(ctx.world.terrain),
+  });
+  session.lastSent.clear();
+  session.lastStockpile = { ...p.stockpile };
+  session.lastPop = { ...pop };
+  session.lastJobs = '';
+  session.lastMarket = '';
+  session.lastDefeated = false;
+}
+
+// Defeat restart: wipe everything the player still owns, reset their economy and
+// fog memory, then re-seed them at a fresh far-away spawn and re-init the client.
+// The caller (dispatch) has already verified the player is actually defeated.
+export function restartPlayer(ctx: GameContext, session: Session, playerId: PlayerId): void {
+  const world = ctx.world;
+  const owned: EntityId[] = [];
+  for (const [id, owner] of world.owner) if (owner === playerId) owned.push(id);
+  for (const id of owned) killEntity(world, id); // buildings only (0 units = defeated)
+
+  const p = world.players.get(playerId)!;
+  p.stockpile = { ...STARTING_STOCKPILE };
+  p.jobDesired = {};
+  world.markPlayerDirty(playerId);
+  world.discoveredResources.delete(playerId);
+
+  const spawn = findSpawnTile(world);
+  p.spawnTileX = spawn.x;
+  p.spawnTileY = spawn.y;
+  ctx.db.setPlayerSpawn(playerId, spawn.x, spawn.y);
+  setupNewPlayer(world, playerId, spawn.x, spawn.y);
+
+  sendInit(ctx, session, playerId);
 }
 
 export function handleRegister(ctx: GameContext, session: Session, username: string, password: string): void {

@@ -71,9 +71,12 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   // Resource-specific drop-off camps (cheap, place next to the resource). Each
   // also raises the matching job's capacity and opens a gather radius for it.
   mill: { hp: 300, vision: 4, footprint: 2, buildTime: 25, cost: { wood: 80 }, accepts: ['food'], gatherRadius: 9, jobSlots: { forager: 2 } },
-  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 9, jobSlots: { lumberjack: 2 } },
-  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 9, jobSlots: { stonemason: 2, goldminer: 2 } },
+  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 2 } },
+  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 2, goldminer: 2 } },
   farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 } },
+  // Market: trade resources for gold (and back) at fluctuating prices. Not a
+  // resource drop-off; its UI panel (shown when selected) is the trade desk.
+  market: { hp: 500, vision: 4, footprint: 2, buildTime: 35, cost: { wood: 120, stone: 40 } },
   barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['infantry', 'catapult'] },
   range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer'] },
   stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scout', 'cavalry', 'horse'] },
@@ -103,9 +106,39 @@ export const FARM_RESEED_COST: Cost = { wood: 60 }; // wood to replant an empty 
 // Each Town Center projects a circular territory (the tribe's buildable zone).
 // It starts small and slowly grows; the union of all your TCs' circles is your
 // territory. Growth is in SIM-seconds, so TIME_SCALE fast-forwards it.
-export const TERRITORY_MIN_TILES = 10;
-export const TERRITORY_MAX_TILES = 15;
+export const TERRITORY_MIN_TILES = 15; // starting border radius (+50% over the old 10)
+export const TERRITORY_MAX_TILES = 22.5; // max border radius it grows to (+50% over the old 15)
 export const TERRITORY_GROW_TIME_S = 2 * 3600; // seconds to grow MIN -> MAX
+
+// Town Centers, Lumber Camps and Mining Camps may be placed ANYWHERE outside
+// enemy territory (you don't need your own territory there). Every other
+// building must sit fully inside your own territory. Shared so the server check
+// and the client placement ghost agree.
+export const PLACE_ANYWHERE_KINDS: EntityKind[] = ['townCenter', 'lumbercamp', 'miningcamp'];
+
+// Town Center cost scales with distance from your nearest existing Town Center:
+// within TC_FREE_RADIUS_TILES it costs the base price; beyond that the cost grows
+// linearly (TC_COST_GROWTH_PER_TILE of the base per extra tile), so expanding far
+// from your heartland is progressively expensive. See townCenterCost().
+export const TC_FREE_RADIUS_TILES = 50;
+export const TC_COST_GROWTH_PER_TILE = 0.02; // +2% of the base cost per tile past the free radius
+
+// The cost of a Town Center placed `distTiles` from the nearest existing one (use
+// 0 / your first TC for the base price). Costs are rounded to whole resources.
+export function townCenterCost(distTiles: number): Cost {
+  const base = BUILDING_STATS.townCenter.cost;
+  // No existing TC (distTiles = Infinity) ⇒ your first/recovery TC at base price.
+  const over = isFinite(distTiles) ? Math.max(0, distTiles - TC_FREE_RADIUS_TILES) : 0;
+  const mult = 1 + over * TC_COST_GROWTH_PER_TILE;
+  const scale = (v?: number): number | undefined => (v == null ? undefined : Math.round(v * mult));
+  return { wood: scale(base.wood), stone: scale(base.stone), gold: scale(base.gold), food: scale(base.food) };
+}
+
+// When a unit dies it leaves a corpse — a neutral world entity that lingers and
+// slowly fades, then vanishes after this many SIM-seconds (so it decays while
+// the owner is offline and TIME_SCALE fast-forwards it in tests). Persistent and
+// visible to everyone in vision: a battlefield stays littered for a while.
+export const CORPSE_TTL_S = 15 * 60; // 15 minutes
 
 // Units slowly regenerate health while standing in their own territory. A
 // deliberate, slow recovery to match the multi-day pacing — 1 hp per minute.
@@ -221,6 +254,38 @@ export const JOB_RESOURCE: Partial<Record<VillagerJob, ResourceType>> = {
   forager: 'food',
   farmer: 'food',
 };
+
+// --- market / trading -------------------------------------------------------
+// The market trades wood/food/stone for gold and back. Gold is the currency, so
+// it is never itself traded. Prices are a GLOBAL, shared economy: each commodity
+// carries a price multiplier (baseline 1.0). Selling pushes a commodity's price
+// down (more supply), buying pushes it up; the multiplier then drifts back to
+// 1.0 over ~an hour. There's a buy/sell spread, so the market is a gold sink.
+export const MARKET_TRADABLE: ResourceType[] = ['wood', 'food', 'stone'];
+export const MARKET_TRADE_UNIT = 100; // resources moved per trade click
+
+// Baseline gold per 1 unit of each commodity (at price multiplier 1.0).
+export const MARKET_BASE_PRICE: Record<ResourceType, number> = {
+  wood: 0.4, food: 0.4, stone: 0.5, gold: 0, // gold never trades
+};
+export const MARKET_SPREAD = 0.3; // buy costs ×(1+spread), sell pays ×(1-spread)
+export const MARKET_MIN_MULT = 0.3; // price floor / ceiling (how far trades can move it)
+export const MARKET_MAX_MULT = 3.0;
+// How far one MARKET_TRADE_UNIT trade nudges the multiplier (scaled by amount).
+export const MARKET_STEP = 0.03;
+// Mean reversion toward 1.0, in multiplier-units per SIM-second. 1/3600 means a
+// full deviation of 1.0 unwinds in an hour (smaller deviations sooner) — "prices
+// return to baseline after an hour". Sim-time, so TIME_SCALE fast-forwards it.
+export const MARKET_REVERT_RATE = 1 / 3600;
+
+// Gold you receive for selling `amount` of `resource` at multiplier `mult`.
+export function marketSellTotal(resource: ResourceType, mult: number, amount: number): number {
+  return Math.floor(MARKET_BASE_PRICE[resource] * mult * (1 - MARKET_SPREAD) * amount);
+}
+// Gold it costs to buy `amount` of `resource` at multiplier `mult`.
+export function marketBuyTotal(resource: ResourceType, mult: number, amount: number): number {
+  return Math.ceil(MARKET_BASE_PRICE[resource] * mult * (1 + MARKET_SPREAD) * amount);
+}
 
 // A villager that can't find work for this many SIM-seconds is "idle for a long
 // time" — the client warns the player so they can reassign it. Sim-time, so it

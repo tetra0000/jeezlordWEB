@@ -146,8 +146,10 @@ function reconcile(world: World, pid: PlayerId, vills: Villager[]): void {
   }
 }
 
-// Nearest owned, unfinished foundation whose centre is inside the territory.
-function nearestFoundation(world: World, pid: PlayerId, ctx: PlayerCtx, vid: EntityId): EntityId | null {
+// Nearest owned, unfinished foundation — anywhere. Builders walk to whatever
+// unbuilt building is closest, including Town Centers / camps placed outside the
+// current territory (that's how the player expands into new ground).
+function nearestFoundation(world: World, pid: PlayerId, vid: EntityId): EntityId | null {
   const vtf = world.transform.get(vid);
   if (!vtf) return null;
   let best: EntityId | null = null;
@@ -157,7 +159,6 @@ function nearestFoundation(world: World, pid: PlayerId, ctx: PlayerCtx, vid: Ent
     const k = world.kind.get(id);
     if (!k || !isBuilding(k) || world.isOperational(id)) continue;
     const tf = world.transform.get(id)!;
-    if (!within(ctx.tc, tf.x, tf.y)) continue; // only inside our territory
     const d = Math.hypot(tf.x - vtf.x, tf.y - vtf.y);
     if (d < bestD) { bestD = d; best = id; }
   }
@@ -262,7 +263,7 @@ function assignWork(world: World, pid: PlayerId, ctx: PlayerCtx, id: EntityId, g
       return;
     }
     // Prefer finishing foundations; otherwise repair the nearest damaged building.
-    const target = nearestFoundation(world, pid, ctx, id) ?? nearestRepair(world, pid, ctx, id);
+    const target = nearestFoundation(world, pid, id) ?? nearestRepair(world, pid, ctx, id);
     if (target == null) { goIdle(world, id, g); g.idleTime += dt; return; }
     g.state = 'building';
     g.buildTargetId = target;

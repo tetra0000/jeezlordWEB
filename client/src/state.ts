@@ -3,7 +3,7 @@
 // identity/stockpile, and the current selection. Pure data — render and input
 // modules read/write this.
 import type { EntityView, EntityId, JobReport, PlayerId, Pop, Stockpile } from '../../shared/types.js';
-import type { DeltaMsg } from '../../shared/protocol.js';
+import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
 import { TILE } from '../../shared/constants.js';
 import { BUILDING_STATS, isBuilding } from '../../shared/stats.js';
 import { KIND_STYLE } from './render/colors.js';
@@ -40,8 +40,15 @@ export class ClientState {
   // villager panel; null until the first delta carrying it arrives.
   jobs: JobReport | null = null;
 
+  // Global market price multipliers (from the delta); drives the market panel.
+  market: MarketState | null = null;
+  // True when the server reports we have no units left (offer a restart).
+  defeated = false;
+
   applyDelta(d: DeltaMsg): void {
     if (d.jobs) this.jobs = d.jobs;
+    if (d.market) this.market = d.market;
+    if (d.defeated !== undefined) this.defeated = d.defeated;
     for (const v of d.enter) {
       this.entities.set(v.id, { view: v, rx: v.x, ry: v.y });
     }
@@ -66,6 +73,7 @@ export class ClientState {
     let bestHalf = Infinity;
     for (const e of this.entities.values()) {
       const kind = e.view.kind;
+      if (kind === 'corpse') continue; // corpses are scenery — not hoverable/selectable
       const half = isBuilding(kind)
         ? (BUILDING_STATS[kind].footprint * TILE) / 2
         : KIND_STYLE[kind].size + 3;
@@ -87,6 +95,7 @@ export class ClientState {
     this.entities.clear();
     this.selection.clear();
     this.jobs = null;
+    this.defeated = false; // a fresh init (incl. restart) clears the defeat state
     this.explored = null;
     this.exploredVersion = 0;
   }

@@ -20,7 +20,7 @@ const $ = (id: string) => document.getElementById(id)!;
 // Turn a world delta into audible/visible events by diffing against the state
 // we still hold (call this BEFORE applyDelta overwrites it):
 //  - hp drop on a visible unit/building -> combat impact
-//  - an owned entity leaving -> destroyed (enemy leaves can just be fog, skip)
+//  - an entity in `dead` -> destroyed: death sound + FX, and units leave a corpse
 //  - an owned foundation finishing (build: number -> undefined) -> completion
 function emitDeltaSounds(state: ClientState, msg: DeltaMsg, r: GameRenderer): void {
   const me = state.playerId;
@@ -49,13 +49,17 @@ function emitDeltaSounds(state: ClientState, msg: DeltaMsg, r: GameRenderer): vo
     }
   }
 
-  for (const id of msg.leave) {
+  // Deaths (any owner you could see) — distinct from units merely walking into
+  // fog (those arrive only in `leave`). Units leave a lingering corpse.
+  for (const id of msg.dead ?? []) {
     const old = state.entities.get(id);
-    if (!old || old.view.owner !== me || isResourceNode(old.view.kind)) continue;
-    const sp = r.worldToScreen(old.view.x, old.view.y);
+    if (!old) continue;
+    const sp = r.worldToScreen(old.rx, old.ry);
     const vis = onScreen(sp.x, sp.y);
     sound.play('death', { pan: vis ? panAt(sp.x) : 0, rate: vary(0.25) });
-    if (vis) r.entities.deathFx(old.view.x, old.view.y);
+    // The lingering corpse is a real server entity now (it arrives via `enter`);
+    // here we just punch the instant-of-death dust + sound.
+    if (vis) r.entities.deathFx(old.rx, old.ry);
   }
 }
 
@@ -68,6 +72,12 @@ async function boot(): Promise<void> {
   const errorEl = $('login-error');
   const registerBtn = $('register-btn');
   const statusEl = $('conn-status');
+
+  const defeatOverlay = $('defeat');
+  const restartBtn = $('restart-btn');
+  const refreshDefeat = (): void => {
+    defeatOverlay.classList.toggle('hidden', !state.defeated);
+  };
 
   const state = new ClientState();
   const renderer = new GameRenderer();
@@ -110,12 +120,14 @@ async function boot(): Promise<void> {
         centered = false;
         renderer.setMap(msg.mapTiles, msg.tile, state.terrain);
         camera.centerOn(MAP_PX / 2, MAP_PX / 2);
+        refreshDefeat(); // a fresh init (incl. after restart) clears defeat
         break;
       case 'delta':
         emitDeltaSounds(state, msg, renderer);
         state.applyDelta(msg);
         if (msg.you) Object.assign(state.stockpile, msg.you);
         if (msg.pop) state.pop = msg.pop;
+        if (msg.defeated !== undefined) refreshDefeat();
         break;
       case 'adminState':
         state.adminEnabled = msg.enabled;
@@ -145,6 +157,15 @@ async function boot(): Promise<void> {
   });
   registerBtn.addEventListener('click', () => {
     net.send({ t: 'register', username: usernameEl.value, password: passwordEl.value });
+  });
+
+  // Restart after defeat: ask the server to wipe + re-seed us. The server
+  // replies with a fresh `init`, which clears the overlay. Disable to avoid
+  // double-sends until that init arrives.
+  restartBtn.addEventListener('click', () => {
+    (restartBtn as HTMLButtonElement).disabled = true;
+    net.send({ t: 'restart' });
+    setTimeout(() => ((restartBtn as HTMLButtonElement).disabled = false), 3000);
   });
 
   // Sound mute toggle (button + 'M' key).

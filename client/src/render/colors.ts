@@ -46,8 +46,10 @@ export const KIND_STYLE: Record<EntityKind, KindStyle> = {
   range: { shape: 'rect', glyph: 'R', size: 30 },
   stable: { shape: 'rect', glyph: 'S', size: 30 },
   farm: { shape: 'rect', glyph: 'f', size: 30 },
+  market: { shape: 'rect', glyph: '$', size: 30 },
   tree: { shape: 'circle', glyph: '', size: 9 },
   gold: { shape: 'circle', glyph: '$', size: 9 },
   stone: { shape: 'circle', glyph: '', size: 9 },
   berry: { shape: 'circle', glyph: '', size: 8 },
+  corpse: { shape: 'circle', glyph: '', size: 10 }, // dead unit's body (scenery)
 };

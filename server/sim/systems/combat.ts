@@ -7,12 +7,14 @@ import {
   combatOf,
   isBuilding,
   isResourceNode,
+  isUnit,
   visionOf,
 } from '../../../shared/stats.js';
 import type { EntityId, PlayerId } from '../../../shared/types.js';
 import type { World } from '../world.js';
 import { clearMove, setMoveTarget } from './movement.js';
 import { removeResourceNode } from './gather.js';
+import { spawnCorpse } from '../spawn.js';
 
 function isEnemyOf(world: World, owner: PlayerId, targetId: EntityId): boolean {
   const to = world.owner.get(targetId);
@@ -20,7 +22,8 @@ function isEnemyOf(world: World, owner: PlayerId, targetId: EntityId): boolean {
   return to !== owner;
 }
 
-// Remove a dead entity, unblocking its footprint if it occupied tiles.
+// Remove a dead entity, unblocking its footprint if it occupied tiles. A dying
+// UNIT leaves a corpse behind (a persistent, neutral, decaying body).
 export function killEntity(world: World, id: EntityId): void {
   const kind = world.kind.get(id);
   if (!kind) return;
@@ -28,7 +31,10 @@ export function killEntity(world: World, id: EntityId): void {
     removeResourceNode(world, id);
     return;
   }
-  if (isBuilding(kind)) {
+  if (isUnit(kind)) {
+    const tf = world.transform.get(id)!;
+    spawnCorpse(world, kind, world.owner.get(id) ?? null, tf.x, tf.y);
+  } else if (isBuilding(kind)) {
     const f = BUILDING_STATS[kind].footprint;
     const tf = world.transform.get(id)!;
     const tileX = Math.round(tf.x / TILE - f / 2);

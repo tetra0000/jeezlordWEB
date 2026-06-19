@@ -3,7 +3,7 @@
 // tile (the fog-of-war anti-cheat boundary: out-of-vision entities are NEVER
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
-import type { DeltaMsg } from '../../shared/protocol.js';
+import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
 import type { EntityId, EntityView, JobReport, Pop, Stockpile, Vec2 } from '../../shared/types.js';
 import type { Session } from './session.js';
 import type { World } from '../sim/world.js';
@@ -38,6 +38,8 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.name !== b.name ||
     a.farmAuto !== b.farmAuto ||
     a.job !== b.job ||
+    a.corpse?.fade !== b.corpse?.fade ||
+    a.corpse?.kind !== b.corpse?.kind ||
     pathChanged(a.path, b.path)
   );
 }
@@ -108,6 +110,7 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   const enter: EntityView[] = [];
   const update: EntityView[] = [];
   const leave: EntityId[] = [];
+  const dead: EntityId[] = [];
 
   for (const [id, view] of current) {
     const before = prev.get(id);
@@ -115,7 +118,12 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     else if (viewChanged(view, before)) update.push(view);
   }
   for (const id of prev.keys()) {
-    if (!current.has(id)) leave.push(id);
+    if (current.has(id)) continue;
+    leave.push(id);
+    // A real death (entity gone from the world) vs. merely leaving vision (still
+    // exists, just fogged). Only deaths get death FX / a corpse; resource nodes
+    // "deplete" rather than die, so they're excluded.
+    if (!world.has(id) && !isResourceNode(prev.get(id)!.kind)) dead.push(id);
   }
 
   session.lastSent.clear();
@@ -147,11 +155,32 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     session.lastJobs = jrKey;
   }
 
-  if (enter.length === 0 && update.length === 0 && leave.length === 0 && !you && !pop && !jobs)
+  // Global market prices — sent only when the (quantised) multipliers change.
+  let market: MarketState | undefined;
+  const mk = world.market;
+  const mkKey = `${Math.round(mk.wood * 1000)},${Math.round(mk.food * 1000)},${Math.round(mk.stone * 1000)}`;
+  if (mkKey !== session.lastMarket) {
+    market = { wood: mk.wood, food: mk.food, stone: mk.stone };
+    session.lastMarket = mkKey;
+  }
+
+  // Defeat state (no units left, none training) — sent only when it flips.
+  let defeated: boolean | undefined;
+  const defeatedNow = !world.isAlive(playerId);
+  if (defeatedNow !== session.lastDefeated) {
+    defeated = defeatedNow;
+    session.lastDefeated = defeatedNow;
+  }
+
+  if (enter.length === 0 && update.length === 0 && leave.length === 0 &&
+      !you && !pop && !jobs && !market && defeated === undefined)
     return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
+  if (dead.length) delta.dead = dead;
   if (you) delta.you = you;
   if (pop) delta.pop = pop;
   if (jobs) delta.jobs = jobs;
+  if (market) delta.market = market;
+  if (defeated !== undefined) delta.defeated = defeated;
   return delta;
 }

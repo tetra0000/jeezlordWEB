@@ -6,11 +6,20 @@ import type { ClientMsg } from '../../shared/protocol.js';
 import { MAP_PX, TILE } from '../../shared/constants.js';
 import {
   BUILDING_STATS,
+  MARKET_MAX_MULT,
+  MARKET_MIN_MULT,
+  MARKET_STEP,
+  MARKET_TRADABLE,
+  MARKET_TRADE_UNIT,
   NON_BUILDER_JOBS,
+  PLACE_ANYWHERE_KINDS,
   UNIT_STATS,
   costOf,
   isBuilding,
   isUnit,
+  marketBuyTotal,
+  marketSellTotal,
+  townCenterCost,
 } from '../../shared/stats.js';
 import type { Cost } from '../../shared/stats.js';
 import {
@@ -25,6 +34,7 @@ import {
   handleLogin,
   handleRegister,
   handleResume,
+  restartPlayer,
 } from './session.js';
 import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/movement.js';
 import { killEntity } from '../sim/systems/combat.js';
@@ -66,6 +76,31 @@ function territorySources(world: World, playerId: number): TerritorySource[] {
     out.push({ x: tf.x, y: tf.y, radiusTiles: world.tcRadius.get(id) ?? 0 });
   }
   return out;
+}
+
+// Every OTHER player's territory — you may never build inside it (the rule that
+// keeps Town Centers / camps "anywhere outside enemy territory").
+function enemyTerritorySources(world: World, playerId: number): TerritorySource[] {
+  const out: TerritorySource[] = [];
+  for (const [id, owner] of world.owner) {
+    if (owner == null || owner === playerId || world.kind.get(id) !== 'townCenter' || !world.isOperational(id)) continue;
+    const tf = world.transform.get(id)!;
+    out.push({ x: tf.x, y: tf.y, radiusTiles: world.tcRadius.get(id) ?? 0 });
+  }
+  return out;
+}
+
+// Distance (in tiles) from a point to the player's nearest existing Town Center
+// (any construction state), used to scale a new TC's cost. Infinity if they have
+// none (their first/recovery TC — billed at the base price).
+function nearestOwnTcDistTiles(world: World, playerId: number, x: number, y: number): number {
+  let best = Infinity;
+  for (const [id, owner] of world.owner) {
+    if (owner !== playerId || world.kind.get(id) !== 'townCenter') continue;
+    const tf = world.transform.get(id)!;
+    best = Math.min(best, Math.hypot(tf.x - x, tf.y - y) / TILE);
+  }
+  return best;
 }
 
 function pay(world: World, playerId: number, c: Cost): void {
@@ -135,27 +170,30 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         return session.reject('out of bounds');
       if (!world.footprintFree(tileX, tileY, stat.footprint))
         return session.reject('space is occupied');
-      // Territory rule: you may only build inside your tribe's territory. Town
-      // centers are the exception — they only need to TOUCH it (so you can push
-      // the frontier outward). With no territory at all (lost every TC), only a
-      // new town center is allowed, anywhere, to recover.
-      const sources = territorySources(world, playerId);
-      if (sources.length > 0) {
-        const ok = kind === 'townCenter'
-          ? footprintTouchesTerritory(sources, tileX, tileY, stat.footprint)
-          : footprintInTerritory(sources, tileX, tileY, stat.footprint);
-        if (!ok)
-          return session.reject(
-            kind === 'townCenter'
-              ? 'town centers must touch your territory'
-              : 'must build inside your territory',
-          );
-      } else if (kind !== 'townCenter') {
-        return session.reject('build a town center first');
+      // Placement rules:
+      //  - You may NEVER build inside another player's territory.
+      //  - Town Centers, Lumber Camps and Mining Camps may go anywhere else (no
+      //    own territory required) — this is how you expand into new ground.
+      //  - Every other building must sit fully inside your own territory.
+      const enemy = enemyTerritorySources(world, playerId);
+      if (footprintTouchesTerritory(enemy, tileX, tileY, stat.footprint))
+        return session.reject('cannot build inside enemy territory');
+      if (!PLACE_ANYWHERE_KINDS.includes(kind)) {
+        const sources = territorySources(world, playerId);
+        if (sources.length === 0)
+          return session.reject('build a town center first');
+        if (!footprintInTerritory(sources, tileX, tileY, stat.footprint))
+          return session.reject('must build inside your territory');
       }
+      // Town Centers cost more the further they sit from your nearest existing
+      // one (flat within TC_FREE_RADIUS_TILES, then growing); other buildings
+      // use their fixed stat cost.
+      const cost = kind === 'townCenter'
+        ? townCenterCost(nearestOwnTcDistTiles(world, playerId, (tileX + stat.footprint / 2) * TILE, (tileY + stat.footprint / 2) * TILE))
+        : stat.cost;
       const s = world.players.get(playerId)!.stockpile;
-      if (!canAfford(s, stat.cost)) return session.reject('not enough resources');
-      pay(world, playerId, stat.cost);
+      if (!canAfford(s, cost)) return session.reject('not enough resources');
+      pay(world, playerId, cost);
       // The foundation is placed; the kingdom's idle "builder" villagers will be
       // auto-tasked to it by the jobs system (no manual builder assignment).
       spawnBuilding(world, kind, playerId, tileX, tileY, true);
@@ -247,6 +285,44 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'farm') return;
       world.farmAuto.set(id, !!msg.on);
       world.markDirty(id);
+      return;
+    }
+
+    case 'restart': {
+      // Only a defeated player (no units, none training) may restart.
+      if (world.isAlive(playerId)) return session.reject('you still have units');
+      restartPlayer(ctx, session, playerId);
+      return;
+    }
+
+    case 'market': {
+      const resource = msg.resource;
+      if (!MARKET_TRADABLE.includes(resource)) return session.reject('that resource is not traded');
+      // Trading needs an operational market building.
+      let hasMarket = false;
+      for (const [id, owner] of world.owner) {
+        if (owner === playerId && world.kind.get(id) === 'market' && world.isOperational(id)) { hasMarket = true; break; }
+      }
+      if (!hasMarket) return session.reject('build a market first');
+      const amount = clamp(Math.floor(msg.amount ?? MARKET_TRADE_UNIT), 1, 1000);
+      const res = resource as 'wood' | 'food' | 'stone';
+      const mult = world.market[res];
+      const s = world.players.get(playerId)!.stockpile;
+      if (msg.action === 'sell') {
+        if (s[res] < amount) return session.reject('not enough to sell');
+        s[res] -= amount;
+        s.gold += marketSellTotal(resource, mult, amount);
+        // Selling adds supply → the price drifts down (clamped to the floor).
+        world.market[res] = Math.max(MARKET_MIN_MULT, mult - MARKET_STEP * (amount / MARKET_TRADE_UNIT));
+      } else {
+        const cost = marketBuyTotal(resource, mult, amount);
+        if (s.gold < cost) return session.reject('not enough gold');
+        s.gold -= cost;
+        s[res] += amount;
+        // Buying adds demand → the price drifts up (clamped to the ceiling).
+        world.market[res] = Math.min(MARKET_MAX_MULT, mult + MARKET_STEP * (amount / MARKET_TRADE_UNIT));
+      }
+      world.markPlayerDirty(playerId);
       return;
     }
 

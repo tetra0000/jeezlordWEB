@@ -113,6 +113,15 @@ export function initSchema(db: DatabaseSync): void {
       amount    REAL NOT NULL
     );
 
+    -- Corpses: the unit kind that died (sprite), original owner (team colour),
+    -- and decay age in sim-seconds. The base entity row carries position.
+    CREATE TABLE IF NOT EXISTS ent_corpse (
+      entity_id INTEGER PRIMARY KEY,
+      unit_kind TEXT NOT NULL,
+      team      INTEGER,
+      age       REAL NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS world_meta (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL

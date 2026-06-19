@@ -213,6 +213,19 @@ function miningcamp() {
   im.outline();
   im.save('miningcamp');
 }
+function market() {
+  // 64x64 (footprint 2): a market stall — body, striped awning, a coin.
+  const s = 64;
+  const im = new Img(s, s);
+  box(im, 14, 30, 36, 28);
+  im.rect(22, 42, 20, 16, M); // counter opening
+  for (let i = 0; i < 9; i++) im.rect(10 + i * 5, 24, 5, 8, i % 2 ? M : L); // striped awning
+  im.rect(10, 24, 44, 2, W); // awning lip
+  im.circle(32, 50, 4, W); // coin
+  im.circle(32, 50, 4, M, 0);
+  im.outline();
+  im.save('market');
+}
 function militaryBuilding(name, glyphDraw) {
   const s = 96;
   const im = new Img(s, s);
@@ -328,6 +341,7 @@ house();
 mill();
 lumbercamp();
 miningcamp();
+market();
 militaryBuilding('barracks', (im) => im.line(34, 44, 50, 44, D, 1)); // sword glyph
 militaryBuilding('range', (im) => {
   im.circle(48, 50, 9, D, 0);

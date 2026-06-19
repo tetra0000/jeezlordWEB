@@ -14,6 +14,7 @@ import {
   speedOf,
 } from '../../shared/stats.js';
 import type { EntityId, EntityKind, PlayerId } from '../../shared/types.js';
+import { randomTownName } from './names.js';
 import type { World } from './world.js';
 
 export function spawnUnit(
@@ -63,8 +64,35 @@ export function spawnBuilding(
   });
   if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
   if (stat.trains) world.trainQueue.set(id, []);
-  if (kind === 'townCenter') world.tcRadius.set(id, TERRITORY_MIN_TILES);
+  if (kind === 'townCenter') {
+    world.tcRadius.set(id, TERRITORY_MIN_TILES);
+    // Every Town Center starts named (a random UK town), avoiding names this
+    // player already uses; the owner can rename it later.
+    const used = new Set<string>();
+    for (const [tid, o] of world.owner)
+      if (o === owner && world.kind.get(tid) === 'townCenter') {
+        const n = world.tcName.get(tid);
+        if (n) used.add(n);
+      }
+    world.tcName.set(id, randomTownName(used));
+  }
   if (kind === 'farm') world.resourceAmount.set(id, FARM_FOOD);
+  return id;
+}
+
+// Drop a corpse where a unit died. Neutral (owner = null) so it never blocks
+// tiles, fights, gives vision, or counts toward population; `team` keeps the
+// dead unit's colour. Decays over CORPSE_TTL_S (see corpse.ts).
+export function spawnCorpse(
+  world: World,
+  unitKind: EntityKind,
+  team: PlayerId | null,
+  x: number,
+  y: number,
+  age = 0,
+): EntityId {
+  const id = world.spawn('corpse', null, x, y, 1, 1);
+  world.corpses.set(id, { unitKind, team, age });
   return id;
 }
 

@@ -14,6 +14,8 @@ import { constructionSystem } from './systems/construction.js';
 import { territorySystem } from './systems/territory.js';
 import { trainingSystem } from './systems/training.js';
 import { combatSystem } from './systems/combat.js';
+import { corpseSystem } from './systems/corpse.js';
+import { marketSystem } from './systems/market.js';
 import { healSystem } from './systems/heal.js';
 import type { World } from './world.js';
 
@@ -80,6 +82,8 @@ export class GameLoop {
     territorySystem(this.world, DT);
     trainingSystem(this.world, DT);
     combatSystem(this.world, DT);
+    corpseSystem(this.world, DT); // age + clear corpses combat just created
+    marketSystem(this.world, DT); // drift market prices back toward baseline
     healSystem(this.world, DT);
     this.onTick(this.tick);
   }

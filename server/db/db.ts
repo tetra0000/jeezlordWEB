@@ -134,6 +134,14 @@ export class Db {
     return Number(info.lastInsertRowid);
   }
 
+  // Move a player's recorded spawn tile (used after a defeat restart so future
+  // spawns space themselves from the player's new location, not the old one).
+  setPlayerSpawn(playerId: number, spawnX: number, spawnY: number): void {
+    this.handle
+      .prepare('UPDATE players SET spawn_tile_x = ?, spawn_tile_y = ? WHERE id = ?')
+      .run(spawnX, spawnY, playerId);
+  }
+
   getStockpile(playerId: number): Stockpile | undefined {
     return this.handle
       .prepare('SELECT wood, gold, food, stone FROM stockpiles WHERE player_id = ?')

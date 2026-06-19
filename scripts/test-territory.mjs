@@ -31,13 +31,15 @@ const check = (name, cond, extra = '') => { results.push(cond); console.log(`${c
 
 setTimeout(() => {
   const tc = own('townCenter')[0];
-  check('TC reports a territory radius (~10)', tc && tc.territory >= 9.9 && tc.territory <= 11, `territory=${tc?.territory}`);
+  check('TC reports a territory radius (~15)', tc && tc.territory >= 14.9 && tc.territory <= 16, `territory=${tc?.territory}`);
   const tcx = Math.round(tc.x / TILE), tcy = Math.round(tc.y / TILE);
-  // Far outside territory but in-bounds (30 tiles toward map centre): expect a
-  // territory reject (not an out-of-bounds one).
+  // Far outside territory but in-bounds (~30 tiles toward map centre): expect a
+  // territory reject (not out-of-bounds). Probe several nearby tiles so a stray
+  // resource node on one ("space is occupied") doesn't mask the territory rule.
   const dir = tcx < mapTiles / 2 ? 1 : -1;
-  send({ t: 'build', kind: 'house', tileX: tcx + dir * 30, tileY: tcy });
-  // Just inside territory (3 tiles north): expect success.
+  for (let i = 0; i < 8; i++)
+    send({ t: 'build', kind: 'house', tileX: tcx + dir * (28 + i), tileY: tcy + (i - 4) });
+  // Just inside territory (a few tiles north): expect success.
   send({ t: 'build', kind: 'house', tileX: tcx - 1, tileY: tcy - 4 });
 }, 1500);
 

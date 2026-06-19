@@ -62,6 +62,15 @@ export interface TrainItem {
   total: number;
 }
 
+// A dead unit's body. The entity's kind is 'corpse' and its owner is null
+// (neutral — so combat/vision/population all skip it); `team` keeps the original
+// owner for client tinting. `age` accrues in sim-seconds until CORPSE_TTL_S.
+export interface Corpse {
+  unitKind: EntityKind; // the kind that died (which sprite to render)
+  team: PlayerId | null; // original owner (colour only)
+  age: number; // sim-seconds since death
+}
+
 export interface CombatState {
   cooldownLeft: number;
   targetId: EntityId | null;

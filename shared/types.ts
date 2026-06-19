@@ -29,10 +29,16 @@ export type EntityKind =
   | 'range'
   | 'stable'
   | 'farm'
+  | 'market'
   | 'tree'
   | 'gold'
   | 'stone'
-  | 'berry';
+  | 'berry'
+  // A dead unit's body: a neutral, non-blocking world entity that lingers and
+  // fades over CORPSE_TTL_S, then vanishes. Visible to anyone who's there (it's
+  // part of the shared world — stumble onto a battlefield of them). Not a unit/
+  // building/resource, so the sim systems skip it.
+  | 'corpse';
 
 export type ResourceType = 'wood' | 'gold' | 'food' | 'stone';
 
@@ -88,6 +94,10 @@ export interface EntityView {
   farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
   path?: Vec2[]; // units: remaining move waypoints in world px (sent to the owner only)
+  // Corpses (kind === 'corpse'): the unit kind that died (which sprite to draw),
+  // its team (original owner, for tinting; the corpse entity itself is neutral),
+  // and how much it has decayed (1 = fresh, 0 = gone — drives the fade-out).
+  corpse?: { kind: EntityKind; team: PlayerId | null; fade: number };
 }
 
 export interface Pop {

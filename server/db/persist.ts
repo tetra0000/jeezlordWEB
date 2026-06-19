@@ -29,6 +29,9 @@ export function flush(db: Db, world: World): void {
     `INSERT OR REPLACE INTO ent_building_meta (entity_id, name, radius, farm_auto) VALUES (?, ?, ?, ?)`,
   );
   const upResource = h.prepare(`INSERT OR REPLACE INTO resource_nodes (entity_id, amount) VALUES (?, ?)`);
+  const upCorpse = h.prepare(
+    `INSERT OR REPLACE INTO ent_corpse (entity_id, unit_kind, team, age) VALUES (?, ?, ?, ?)`,
+  );
 
   const delEntity = h.prepare('DELETE FROM entities WHERE id = ?');
   const delMove = h.prepare('DELETE FROM ent_movement WHERE entity_id = ?');
@@ -38,6 +41,7 @@ export function flush(db: Db, world: World): void {
   const delRally = h.prepare('DELETE FROM ent_rally WHERE entity_id = ?');
   const delMeta = h.prepare('DELETE FROM ent_building_meta WHERE entity_id = ?');
   const delResource = h.prepare('DELETE FROM resource_nodes WHERE entity_id = ?');
+  const delCorpse = h.prepare('DELETE FROM ent_corpse WHERE entity_id = ?');
 
   const deleteAllSidecars = (id: number) => {
     delMove.run(id);
@@ -47,6 +51,7 @@ export function flush(db: Db, world: World): void {
     delRally.run(id);
     delMeta.run(id);
     delResource.run(id);
+    delCorpse.run(id);
   };
 
   h.exec('BEGIN IMMEDIATE');
@@ -91,6 +96,9 @@ export function flush(db: Db, world: World): void {
 
       const amt = world.resourceAmount.get(id);
       if (amt != null) upResource.run(id, amt);
+
+      const cp = world.corpses.get(id);
+      if (cp) upCorpse.run(id, cp.unitKind, cp.team, cp.age);
     }
 
     for (const pid of world.dirtyPlayers) {
@@ -102,6 +110,10 @@ export function flush(db: Db, world: World): void {
     }
 
     db.setMeta('next_entity_id', String(world.peekNextId()));
+    // Global market price multipliers (small, drift continuously — write each flush).
+    db.setMeta('market_wood', String(world.market.wood));
+    db.setMeta('market_food', String(world.market.food));
+    db.setMeta('market_stone', String(world.market.stone));
     h.exec('COMMIT');
   } catch (err) {
     h.exec('ROLLBACK');

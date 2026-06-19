@@ -598,3 +598,70 @@ button:active {
 #toast.show {
   opacity: 1;
 }
+
+/* Defeat overlay (reuses .overlay/.panel). */
+#defeat .panel {
+  width: 360px;
+  text-align: center;
+  align-items: center;
+}
+.defeat-title {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: 1px;
+  color: #e89090;
+}
+.defeat-msg {
+  color: #bcd;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 4px 0 8px;
+}
+#restart-btn {
+  background: #2a362a;
+  border: 1px solid #6ad06a;
+  color: #cfeecf;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 15px;
+  cursor: pointer;
+}
+#restart-btn:hover:not(:disabled) {
+  background: #355035;
+}
+#restart-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Market trade rows inside the info panel. */
+#info-panel .mk-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+#info-panel .mk-res {
+  width: 18px;
+  text-align: center;
+}
+#info-panel .mk-btn {
+  flex: 1;
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #dfe;
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#info-panel .mk-btn:hover {
+  background: #2a362a;
+}
+#info-panel .mk-buy {
+  border-color: #6a8ad0;
+}
+#info-panel .mk-sell {
+  border-color: #d0c06a;
+}

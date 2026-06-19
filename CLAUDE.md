@@ -141,8 +141,22 @@ node/farm/foundation) → `pathfinding` (A* on the tile grid, bounded request
 queue) → `movement` (follows waypoints off-grid) → `gather` (villager
 harvest/haul/deposit, incl. farms) → `farm` (auto-reseed empty farms) →
 `construction` (advance only with builders present) → `territory` (grow TC radii)
-→ `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill). Each
-runs over ALL entities regardless of owner online status.
+→ `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill; a dying
+UNIT leaves a neutral `corpse` entity) → `corpse` (age + remove faded corpses) →
+`market` (drift global prices back to baseline) → `heal` (regen units in own
+territory). Each runs over ALL entities regardless of owner online status.
+
+Other load-bearing pieces that aren't tick systems:
+- **Defeat/restart:** a player with 0 units (and none training) is `defeated`
+  (`World.isAlive`, surfaced in the delta); the `restart` intent
+  (`session.restartPlayer`) wipes their entities + economy and re-seeds them at a
+  fresh spawn via a fresh `init`. Territory is purely derived from live
+  operational TCs, so destroying a TC drops its border immediately.
+- **Market:** the `market` building is a trade desk; prices are a GLOBAL economy
+  (`World.market` multipliers, persisted in `world_meta`). The `market` intent
+  buys/sells wood/food/stone for gold (gold is the currency), moving the price;
+  `marketSystem` reverts it toward baseline over ~an hour. All trade math is in
+  `shared/stats.ts` (`marketBuyTotal`/`marketSellTotal`).
 
 `TIME_SCALE` env multiplies the sim dt (default 1 = real slow pacing). Set high
 (e.g. 30) to fast-forward for tests; the test scripts assume this.
