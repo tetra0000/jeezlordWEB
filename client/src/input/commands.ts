@@ -108,6 +108,9 @@ export class Input {
   private readonly renameModal = document.getElementById('rename-modal')!;
   private readonly renameInput = document.getElementById('rename-input') as HTMLInputElement;
   private renameId: number | null = null;
+  // True while hovering a DOM control with its own tooltip (setTip). Stops the
+  // canvas hover handler (updateTooltip) from hiding/overwriting it on every move.
+  private uiTipActive = false;
   private panelKey = '';
   private infoKey = '';
   private adminKey = '';
@@ -719,13 +722,21 @@ export class Input {
 
   // Attach a hover tooltip to a DOM element (replaces native `title=`).
   private setTip(el: HTMLElement, title: string, body: string): void {
-    el.addEventListener('mouseenter', (e) => this.showTip(title, body, e.clientX, e.clientY));
+    el.addEventListener('mouseenter', (e) => {
+      this.uiTipActive = true;
+      this.showTip(title, body, e.clientX, e.clientY);
+    });
     el.addEventListener('mousemove', (e) => this.positionTip(e.clientX, e.clientY));
-    el.addEventListener('mouseleave', () => this.hideTip());
+    el.addEventListener('mouseleave', () => {
+      this.uiTipActive = false;
+      this.hideTip();
+    });
   }
 
   // Hover tooltip describing whatever is under the cursor.
   private updateTooltip(cx: number, cy: number): void {
+    // A DOM control's own tooltip is showing — don't fight it.
+    if (this.uiTipActive) return;
     if (this.pendingBuild || this.dragging || !this.renameModal.classList.contains('hidden')) {
       this.tooltipEl.classList.add('hidden');
       return;
