@@ -290,12 +290,14 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     }
 
     case 'delete': {
-      // Destroy your own units. No refund. Only units (not buildings) and only
-      // entities you own — re-validated here; never trust the client.
+      // Destroy your own units or buildings. No refund. Only entities you own
+      // and only units/buildings (never resource nodes) — re-validated here;
+      // never trust the client. The client gates building deletion behind a
+      // confirm dialog, but the server is the authority.
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
         const k = world.kind.get(id);
-        if (!k || !isUnit(k)) continue;
+        if (!k || (!isUnit(k) && !isBuilding(k))) continue;
         killEntity(world, id);
       }
       return;

@@ -108,6 +108,8 @@ export class Input {
   private readonly renameModal = document.getElementById('rename-modal')!;
   private readonly renameInput = document.getElementById('rename-input') as HTMLInputElement;
   private renameId: number | null = null;
+  private readonly confirmModal = document.getElementById('confirm-modal')!;
+  private confirmAction: (() => void) | null = null;
   // True while hovering a DOM control with its own tooltip (setTip). Stops the
   // canvas hover handler (updateTooltip) from hiding/overwriting it on every move.
   private uiTipActive = false;
@@ -127,6 +129,13 @@ export class Input {
     const canvas = r.app.canvas;
 
     window.addEventListener('keydown', (e) => {
+      // While the confirm dialog is up, Enter/Esc accept/dismiss it and nothing
+      // else fires. (The rename input handles its own keys via stopPropagation.)
+      if (!this.confirmModal.classList.contains('hidden')) {
+        if (e.key === 'Enter') this.acceptConfirm();
+        else if (e.key === 'Escape') this.closeConfirm();
+        return;
+      }
       if (e.key === 'Shift') this.shift = true;
       if (e.key === 'Escape') this.cancelPlacement();
       if (e.key === 'Delete') this.deleteSelected();
@@ -146,6 +155,13 @@ export class Input {
     });
     this.renameModal.addEventListener('pointerdown', (e) => {
       if (e.target === this.renameModal) this.closeRename(); // click backdrop to dismiss
+    });
+
+    // Generic confirm dialog (used by building deletion).
+    document.getElementById('confirm-ok')!.addEventListener('click', () => this.acceptConfirm());
+    document.getElementById('confirm-cancel')!.addEventListener('click', () => this.closeConfirm());
+    this.confirmModal.addEventListener('pointerdown', (e) => {
+      if (e.target === this.confirmModal) this.closeConfirm();
     });
 
     canvas.addEventListener('pointerdown', (e) => {
@@ -237,23 +253,41 @@ export class Input {
     return out;
   }
 
-  // Own units (any kind, incl. villagers) in the current selection — the set the
-  // Delete command acts on (buildings are not deletable).
-  private selectedOwnUnits(): number[] {
+  // Own entities (units incl. villagers, AND buildings) in the current selection
+  // — the set the Delete command acts on. Server re-validates ownership.
+  private selectedOwnDeletable(): number[] {
     const out: number[] = [];
     for (const id of this.state.selection) {
       const e = this.state.entities.get(id);
-      if (e && e.view.owner === this.state.playerId && isUnit(e.view.kind)) out.push(id);
+      if (e && e.view.owner === this.state.playerId && (isUnit(e.view.kind) || isBuilding(e.view.kind)))
+        out.push(id);
     }
     return out;
   }
 
-  // Destroy the selected own units (no resource refund). Server re-validates.
+  // Destroy the selected own units/buildings (no resource refund). Deleting a
+  // building is gated behind a confirm dialog (a stray Delete could wipe your
+  // Town Center); a units-only selection deletes instantly. Server re-validates.
   private deleteSelected(): void {
-    const ids = this.selectedOwnUnits();
+    const ids = this.selectedOwnDeletable();
     if (ids.length === 0) return;
+    const buildings = ids.filter((id) => {
+      const e = this.state.entities.get(id);
+      return e && isBuilding(e.view.kind);
+    });
+    if (buildings.length === 0) {
+      this.sendDelete(ids);
+      return;
+    }
+    const bn = buildings.length;
+    const msg = `This will destroy ${ids.length} selected (including ${bn} building${bn === 1 ? '' : 's'}). ` +
+      `No resources are refunded and it cannot be undone.`;
+    this.askConfirm('Delete buildings?', msg, () => this.sendDelete(ids));
+  }
+
+  private sendDelete(ids: number[]): void {
     this.net.send({ t: 'delete', unitIds: ids });
-    this.showToast(`deleted ${ids.length} unit${ids.length === 1 ? '' : 's'}`);
+    this.showToast(`deleted ${ids.length} thing${ids.length === 1 ? '' : 's'}`);
   }
 
   // Own production buildings (those with a train list) in the selection.
@@ -392,7 +426,7 @@ export class Input {
   // Rebuild the panel when the selection's relevant signature changes.
   update(): void {
     const trainer = this.trainerBuilding();
-    const key = `${trainer ?? ''}|${this.pendingBuild ?? ''}|d${this.selectedOwnUnits().length}`;
+    const key = `${trainer ?? ''}|${this.pendingBuild ?? ''}|d${this.selectedOwnDeletable().length}`;
     if (key !== this.panelKey) this.refreshPanel(false);
     this.updateInfoPanel();
     this.updateAdminPanel();
@@ -552,6 +586,25 @@ export class Input {
     this.renameModal.classList.add('hidden');
   }
 
+  // --- generic confirm dialog -----------------------------------------------
+  private askConfirm(title: string, message: string, onYes: () => void): void {
+    this.confirmAction = onYes;
+    document.getElementById('confirm-title')!.textContent = title;
+    document.getElementById('confirm-msg')!.textContent = message;
+    this.confirmModal.classList.remove('hidden');
+  }
+
+  private acceptConfirm(): void {
+    const act = this.confirmAction;
+    this.closeConfirm();
+    act?.();
+  }
+
+  private closeConfirm(): void {
+    this.confirmAction = null;
+    this.confirmModal.classList.add('hidden');
+  }
+
   private hpBar(hp: number, maxHp: number): string {
     const ratio = maxHp > 0 ? Math.max(0, hp / maxHp) : 0;
     const col = ratio > 0.5 ? '#4ad96a' : ratio > 0.25 ? '#d9c14a' : '#d94a4a';
@@ -636,7 +689,7 @@ export class Input {
 
   private refreshPanel(force: boolean): void {
     const trainer = this.trainerBuilding();
-    const delUnits = this.selectedOwnUnits();
+    const delUnits = this.selectedOwnDeletable();
     this.panelKey = `${trainer ?? ''}|${this.pendingBuild ?? ''}|d${delUnits.length}`;
     this.panel.innerHTML = '';
 
@@ -737,7 +790,9 @@ export class Input {
   private updateTooltip(cx: number, cy: number): void {
     // A DOM control's own tooltip is showing — don't fight it.
     if (this.uiTipActive) return;
-    if (this.pendingBuild || this.dragging || !this.renameModal.classList.contains('hidden')) {
+    if (this.pendingBuild || this.dragging
+      || !this.renameModal.classList.contains('hidden')
+      || !this.confirmModal.classList.contains('hidden')) {
       this.tooltipEl.classList.add('hidden');
       return;
     }

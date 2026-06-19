@@ -56,6 +56,18 @@
       </div>
     </div>
 
+    <!-- In-game confirm dialog (e.g. deleting a building) -->
+    <div id="confirm-modal" class="hidden">
+      <div class="modal">
+        <div class="modal-title" id="confirm-title">Are you sure?</div>
+        <div class="modal-msg" id="confirm-msg"></div>
+        <div class="modal-buttons">
+          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-ok" type="button" class="danger">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="bundle.js"></script>
   </body>
 </html>

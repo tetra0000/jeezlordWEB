@@ -507,8 +507,9 @@ button:active {
   color: #9ab;
 }
 
-/* In-game modal dialog (e.g. rename), replacing native prompt(). */
-#rename-modal {
+/* In-game modal dialogs (rename, confirm), replacing native prompt()/confirm(). */
+#rename-modal,
+#confirm-modal {
   position: fixed;
   inset: 0;
   display: flex;
@@ -518,7 +519,7 @@ button:active {
   z-index: 12;
   pointer-events: auto;
 }
-#rename-modal .modal {
+.modal {
   background: #161b16f2;
   border: 1px solid #4a5a4a;
   border-radius: 10px;
@@ -529,12 +530,17 @@ button:active {
   gap: 12px;
   box-shadow: 0 10px 34px #000a;
 }
-#rename-modal .modal-title {
+.modal .modal-title {
   font-size: 15px;
   font-weight: bold;
   color: #ffe08a;
 }
-#rename-modal input {
+.modal .modal-msg {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cfe;
+}
+.modal input {
   padding: 9px 11px;
   border-radius: 6px;
   border: 1px solid #4a5a4a;
@@ -542,16 +548,16 @@ button:active {
   color: #eee;
   font-size: 14px;
 }
-#rename-modal input:focus {
+.modal input:focus {
   outline: none;
   border-color: #8ad06a;
 }
-#rename-modal .modal-buttons {
+.modal .modal-buttons {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
 }
-#rename-modal .modal-buttons button {
+.modal .modal-buttons button {
   padding: 7px 14px;
   border-radius: 6px;
   border: 1px solid #4a5a4a;
@@ -560,12 +566,17 @@ button:active {
   font-size: 13px;
   cursor: pointer;
 }
-#rename-modal #rename-save {
+.modal #rename-save {
   background: #4a6a3a;
   border-color: #8ad06a;
   color: #fff;
 }
-#rename-modal .modal-buttons button:hover {
+.modal .modal-buttons button.danger {
+  background: #5a2626;
+  border-color: #a05050;
+  color: #ffd9d9;
+}
+.modal .modal-buttons button:hover {
   filter: brightness(1.15);
 }
 
