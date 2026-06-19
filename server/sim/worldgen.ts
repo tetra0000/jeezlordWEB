@@ -3,8 +3,8 @@
 // gold/stone/berry clusters — across the remaining grass. Runs only on a fresh
 // world (guarded by a 'seeded' meta flag in main.ts). Terrain is persisted as a
 // base64 blob; resources persist as entities.
-import { MAP_TILES, TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
-import type { EntityKind } from '../../shared/types.js';
+import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
+import type { EntityId, EntityKind } from '../../shared/types.js';
 import type { World } from './world.js';
 import { spawnResourceNode } from './spawn.js';
 
@@ -306,6 +306,119 @@ function ensureConnectivity(world: World): number {
   return connectors;
 }
 
+// Final, runtime-accurate connectivity guarantee: after EVERY blocker exists
+// (terrain + resource nodes), make sure no walkable tile is unreachable from the
+// rest of the walkable map. `ensureConnectivity` above only sees terrain; trees
+// and gold/stone/berry nodes also block their tile, so two adjacent forests (or a
+// forest hugging a river/mountain) can seal off a pocket of grass. Here a tile is
+// "walkable" exactly as the sim sees it (`isBlockedTile`: not water/mountain and
+// no dynamic blocker). We label the 4-connected walkable components, take the
+// largest as the mainland, and carve a 1-wide corridor from every other component
+// to the nearest mainland tile — converting impassable terrain and deleting any
+// resource node in the way. 4-connectivity is the right model: the A* forbids
+// corner-cutting, so an orthogonal path is the conservative reachability test.
+// Returns the number of corridors carved.
+function ensureWalkableConnectivity(world: World): number {
+  const N = MAP_TILES;
+  const total = N * N;
+  const NEIGH = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const; // opposite of k is k^1
+  const walkable = (tx: number, ty: number): boolean => !world.isBlockedTile(tx, ty);
+
+  // Tile -> resource-node entity (the only dynamic blockers at world spawn: no
+  // players/buildings exist yet). Lets a corridor delete a node in its path.
+  const nodeAt = new Map<number, EntityId>();
+  for (const id of world.entityIds()) {
+    if (!world.resourceAmount.has(id)) continue;
+    const tf = world.transform.get(id);
+    if (!tf) continue;
+    nodeAt.set(world.tileIndex(Math.floor(tf.x / TILE), Math.floor(tf.y / TILE)), id);
+  }
+
+  // Label 4-connected walkable components; track sizes to find the mainland.
+  const comp = new Int32Array(total).fill(-1);
+  const sizes: number[] = [];
+  for (let s = 0; s < total; s++) {
+    if (comp[s] !== -1 || !walkable(s % N, (s - (s % N)) / N)) continue;
+    const label = sizes.length;
+    let size = 0;
+    const q = [s];
+    comp[s] = label;
+    for (let head = 0; head < q.length; head++) {
+      const i = q[head];
+      const x = i % N;
+      const y = (i - x) / N;
+      size++;
+      for (const [dx, dy] of NEIGH) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const ni = ny * N + nx;
+        if (comp[ni] !== -1 || !walkable(nx, ny)) continue;
+        comp[ni] = label;
+        q.push(ni);
+      }
+    }
+    sizes.push(size);
+  }
+  if (sizes.length <= 1) return 0; // already fully connected (or no land at all)
+
+  let main = 0;
+  for (let l = 1; l < sizes.length; l++) if (sizes[l] > sizes[main]) main = l;
+
+  // Multi-source BFS from the mainland over the WHOLE grid (blockers ignored) so
+  // every tile knows the next orthogonal step toward the nearest mainland tile.
+  const ARRIVED = 9;
+  const stepDir = new Int8Array(total).fill(-1);
+  const bq: number[] = [];
+  for (let i = 0; i < total; i++) if (comp[i] === main) { stepDir[i] = ARRIVED; bq.push(i); }
+  for (let head = 0; head < bq.length; head++) {
+    const cur = bq[head];
+    const cx = cur % N;
+    const cy = (cur - cx) / N;
+    for (let k = 0; k < 4; k++) {
+      const nx = cx + NEIGH[k][0], ny = cy + NEIGH[k][1];
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const ni = ny * N + nx;
+      if (stepDir[ni] !== -1) continue;
+      stepDir[ni] = (k ^ 1) as number; // from ni, move opposite of how we got here
+      bq.push(ni);
+    }
+  }
+
+  const clearTile = (tx: number, ty: number): void => {
+    if (!world.inBounds(tx, ty)) return;
+    const i = world.tileIndex(tx, ty);
+    const t = world.terrain[i];
+    if (t === TERRAIN_WATER) world.terrain[i] = TERRAIN_BRIDGE;
+    else if (t === TERRAIN_MOUNTAIN) world.terrain[i] = TERRAIN_GRASS;
+    const node = nodeAt.get(i);
+    if (node !== undefined) {
+      world.unblockFootprint(tx, ty, 1);
+      world.remove(node);
+      nodeAt.delete(i);
+    }
+  };
+
+  // Carve one corridor per non-mainland component, following the BFS gradient.
+  let connectors = 0;
+  const handled = new Set<number>([main]);
+  for (let i = 0; i < total; i++) {
+    const l = comp[i];
+    if (l < 0 || handled.has(l)) continue;
+    handled.add(l);
+    let p = i;
+    let guard = total;
+    while (guard-- > 0) {
+      clearTile(p % N, (p - (p % N)) / N);
+      if (comp[p] === main) break; // reached the mainland
+      const sd = stepDir[p];
+      if (sd < 0 || sd === ARRIVED) break;
+      p += NEIGH[sd][1] * N + NEIGH[sd][0];
+    }
+    connectors++;
+  }
+  return connectors;
+}
+
 // Carve a winding clearing through a forest blob: a noisy line that crosses the
 // disk roughly through the centre, with a band ~3-4 tiles wide kept tree-free so
 // units can path through the wood instead of having to chop a tunnel. Returns the
@@ -406,6 +519,11 @@ export function seedWorld(world: World): void {
   // Stone deposits.
   for (let s = 0; s < 68; s++) placeCluster(world, 'stone', randTile(), randTile(), 2 + Math.floor(Math.random() * 3), 2);
 
+  // Resources are blockers too, so forests/clusters can seal off pockets of grass
+  // that the terrain-only pass above couldn't see. Re-check connectivity against
+  // the real walkability and open a corridor out of every isolated pocket.
+  const pockets = ensureWalkableConnectivity(world);
+
   let water = 0;
   let bridge = 0;
   let mountain = 0;
@@ -418,6 +536,6 @@ export function seedWorld(world: World): void {
   console.log(
     `[worldgen] seeded ${[...world.entityIds()].length} resource nodes, ` +
       `${water} water + ${bridge} bridge + ${mountain} mountain tiles, ` +
-      `${connectors} connectivity corridor(s) carved`,
+      `${connectors} terrain + ${pockets} walkable corridor(s) carved`,
   );
 }
