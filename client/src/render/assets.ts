@@ -19,6 +19,8 @@ export async function loadAssets(): Promise<void> {
     tile_water: 'assets/tile_water.png',
     tile_bridge: 'assets/tile_bridge.png',
     tile_mountain: 'assets/tile_mountain.png',
+    tile_mud: 'assets/tile_mud.png',
+    tile_beach: 'assets/tile_beach.png',
     tile_forestground: 'assets/tile_forestground.png',
   };
   for (const k of ENTITY_KINDS) manifest[k] = `assets/${k}.png`;

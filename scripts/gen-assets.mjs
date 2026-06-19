@@ -312,6 +312,24 @@ function mountain() {
   }
   im.save('tile_mountain');
 }
+function mud() {
+  const im = new Img(32, 32);
+  let seed = 9157;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [104, 76, 46]); // wet brown
+  const specks = [[88, 62, 36], [122, 92, 58], [72, 50, 30]];
+  for (let i = 0; i < 90; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 3)], 150 + rnd() * 90);
+  im.save('tile_mud');
+}
+function beach() {
+  const im = new Img(32, 32);
+  let seed = 5531;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [216, 200, 150]); // pale sand
+  const specks = [[230, 216, 168], [196, 178, 130], [168, 150, 110]];
+  for (let i = 0; i < 90; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 3)], 150 + rnd() * 90);
+  im.save('tile_beach');
+}
 function bridge() {
   const im = new Img(32, 32);
   im.rect(0, 0, 32, 32, [120, 82, 44]); // plank wood
@@ -381,6 +399,8 @@ grass();
 water();
 bridge();
 mountain();
+mud();
+beach();
 
 fx('chop', (im) => { for (const [x, y] of [[6, 6], [9, 5], [7, 9], [10, 9]]) im.rect(x, y, 2, 2, [150, 100, 50]); });
 fx('spark', (im) => { im.line(3, 8, 13, 8, [255, 224, 90], 0); im.line(8, 3, 8, 13, [255, 224, 90], 0); im.circle(8, 8, 2, [255, 245, 180]); });

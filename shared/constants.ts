@@ -14,6 +14,11 @@ export const TERRAIN_BRIDGE = 2;
 // Mountains are static, impassable terrain (like water) — generated as ranges
 // with deliberate walkable passes carved through. Rendered as a rocky tile.
 export const TERRAIN_MOUNTAIN = 3;
+// Mud lines river banks; beach appears at scattered shoreline points. Both are
+// purely cosmetic ground — PASSABLE exactly like grass (only water/mountain
+// block). New tiles in v10's terrain-variety pass.
+export const TERRAIN_MUD = 4;
+export const TERRAIN_BEACH = 5;
 
 export const TICK_HZ = 10; // authoritative simulation rate
 export const TICK_MS = 1000 / TICK_HZ;

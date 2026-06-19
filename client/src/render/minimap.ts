@@ -1,7 +1,7 @@
 // Minimap drawn on a plain 2D canvas: own entities (bright), currently-visible
 // others (server-filtered, so out-of-vision enemies never appear), and the
 // camera viewport rectangle. Click to recentre the camera.
-import { MAP_PX, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN } from '../../../shared/constants.js';
+import { MAP_PX, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH } from '../../../shared/constants.js';
 import { isBuilding, isResourceNode } from '../../../shared/stats.js';
 import type { ClientState } from '../state.js';
 import type { GameRenderer } from './app.js';
@@ -48,8 +48,13 @@ export class Minimap {
     for (let ty = 0; ty < mapTiles; ty++) {
       for (let tx = 0; tx < mapTiles; tx++) {
         const code = terrain[ty * mapTiles + tx];
-        if (code !== TERRAIN_WATER && code !== TERRAIN_BRIDGE && code !== TERRAIN_MOUNTAIN) continue;
-        tctx.fillStyle = code === TERRAIN_WATER ? '#2c5a86' : code === TERRAIN_MOUNTAIN ? '#56545a' : '#8a5a32';
+        if (code !== TERRAIN_WATER && code !== TERRAIN_BRIDGE && code !== TERRAIN_MOUNTAIN
+          && code !== TERRAIN_MUD && code !== TERRAIN_BEACH) continue;
+        tctx.fillStyle = code === TERRAIN_WATER ? '#2c5a86'
+          : code === TERRAIN_MOUNTAIN ? '#56545a'
+          : code === TERRAIN_MUD ? '#6b4a2a'
+          : code === TERRAIN_BEACH ? '#d9c89a'
+          : '#8a5a32';
         tctx.fillRect(tx * px, ty * px, cell, cell);
       }
     }

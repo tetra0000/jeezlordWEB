@@ -3,7 +3,7 @@
 // everywhere; water/bridge sprites are stamped only on the (sparse) non-grass
 // tiles, so the layer stays cheap to build.
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
-import { TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN } from '../../../shared/constants.js';
+import { TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH } from '../../../shared/constants.js';
 import { tex } from './assets.js';
 
 export function buildTileLayer(mapTiles: number, tile: number, terrain: Uint8Array | null): Container {
@@ -46,9 +46,13 @@ export function buildTileLayer(mapTiles: number, tile: number, terrain: Uint8Arr
     for (let ty = 0; ty < mapTiles; ty++) {
       for (let tx = 0; tx < mapTiles; tx++) {
         const code = terrain[ty * mapTiles + tx];
-        if (code !== TERRAIN_WATER && code !== TERRAIN_BRIDGE && code !== TERRAIN_MOUNTAIN) continue;
+        if (code === undefined) continue;
+        if (code !== TERRAIN_WATER && code !== TERRAIN_BRIDGE && code !== TERRAIN_MOUNTAIN
+          && code !== TERRAIN_MUD && code !== TERRAIN_BEACH) continue;
         const t = code === TERRAIN_WATER ? tex.tile_water
           : code === TERRAIN_MOUNTAIN ? tex.tile_mountain
+          : code === TERRAIN_MUD ? tex.tile_mud
+          : code === TERRAIN_BEACH ? tex.tile_beach
           : tex.tile_bridge;
         if (t) {
           const s = new Sprite(t);
@@ -57,7 +61,8 @@ export function buildTileLayer(mapTiles: number, tile: number, terrain: Uint8Arr
           s.position.set(tx * tile, ty * tile);
           (code === TERRAIN_BRIDGE ? bridgeLayer : baseLayer).addChild(s);
         } else {
-          const fallback = code === TERRAIN_WATER ? 0x2c5a86 : code === TERRAIN_MOUNTAIN ? 0x56545a : 0x8a5a32;
+          const fallback = code === TERRAIN_WATER ? 0x2c5a86 : code === TERRAIN_MOUNTAIN ? 0x56545a
+            : code === TERRAIN_MUD ? 0x6b4a2a : code === TERRAIN_BEACH ? 0xd9c89a : 0x8a5a32;
           const g = new Graphics();
           g.rect(tx * tile, ty * tile, tile, tile).fill(fallback);
           (code === TERRAIN_BRIDGE ? bridgeLayer : baseLayer).addChild(g);
