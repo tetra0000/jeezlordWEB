@@ -22,6 +22,7 @@ export async function loadAssets(): Promise<void> {
     tile_mud: 'assets/tile_mud.png',
     tile_beach: 'assets/tile_beach.png',
     tile_forestground: 'assets/tile_forestground.png',
+    tile_path: 'assets/tile_path.png',
   };
   for (const k of ENTITY_KINDS) manifest[k] = `assets/${k}.png`;
   for (const f of FX) manifest['fx_' + f] = `assets/fx_${f}.png`;

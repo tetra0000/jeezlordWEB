@@ -60,9 +60,16 @@ export class World {
   readonly admin = new Set<PlayerId>();
   readonly adminReveal = new Set<PlayerId>();
 
-  // Tile occupancy: count of blockers per tile (buildings, walls, resource
+  // Tile occupancy: count of blockers per tile (most buildings, walls, resource
   // nodes). >0 means impassable for pathfinding.
   readonly blocked = new Uint8Array(MAP_TILES * MAP_TILES);
+
+  // No-build reservations: count of build-only blockers per tile. >0 means a
+  // building may not be placed here, but units may still walk it. Used for
+  // walkable buildings' footprints (farms, resource camps) and the "courtyard"
+  // ring around military buildings. Derived from live buildings (rebuilt on
+  // load), so it's never persisted on its own.
+  readonly noBuild = new Uint8Array(MAP_TILES * MAP_TILES);
 
   // Static terrain code per tile (grass/water/bridge — see shared/constants).
   // Generated once by worldgen, persisted, and shipped to clients. Water is
@@ -104,10 +111,23 @@ export class World {
     if (!this.inBounds(tx, ty)) return TERRAIN_WATER;
     return this.terrain[this.tileIndex(tx, ty)];
   }
-  private addBlock(tx: number, ty: number, delta: number): void {
+  // Can a building be placed on this tile? False if it's impassable terrain, a
+  // movement blocker, OR a no-build reservation (a walkable building / military
+  // courtyard). Note: walkable but reserved tiles fail this yet pass
+  // isBlockedTile, which is exactly the point.
+  canBuildTile(tx: number, ty: number): boolean {
+    if (this.isBlockedTile(tx, ty)) return false;
+    return this.noBuild[this.tileIndex(tx, ty)] === 0;
+  }
+  addBlock(tx: number, ty: number, delta: number): void {
     if (!this.inBounds(tx, ty)) return;
     const i = this.tileIndex(tx, ty);
     this.blocked[i] = Math.max(0, this.blocked[i] + delta);
+  }
+  addNoBuild(tx: number, ty: number, delta: number): void {
+    if (!this.inBounds(tx, ty)) return;
+    const i = this.tileIndex(tx, ty);
+    this.noBuild[i] = Math.max(0, this.noBuild[i] + delta);
   }
   blockFootprint(tileX: number, tileY: number, footprint: number): void {
     for (let dy = 0; dy < footprint; dy++)
@@ -120,7 +140,7 @@ export class World {
   footprintFree(tileX: number, tileY: number, footprint: number): boolean {
     for (let dy = 0; dy < footprint; dy++)
       for (let dx = 0; dx < footprint; dx++)
-        if (this.isBlockedTile(tileX + dx, tileY + dy)) return false;
+        if (!this.canBuildTile(tileX + dx, tileY + dy)) return false;
     return true;
   }
 

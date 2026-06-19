@@ -112,6 +112,15 @@ function pay(world: World, playerId: number, c: Cost): void {
   world.markPlayerDirty(playerId);
 }
 
+function refund(world: World, playerId: number, c: Cost): void {
+  const s = world.players.get(playerId)!.stockpile;
+  s.wood += c.wood ?? 0;
+  s.gold += c.gold ?? 0;
+  s.food += c.food ?? 0;
+  s.stone += c.stone ?? 0;
+  world.markPlayerDirty(playerId);
+}
+
 export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): void {
   const world = ctx.world;
   switch (msg.t) {
@@ -366,14 +375,17 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     }
 
     case 'delete': {
-      // Destroy your own units or buildings. No refund. Only entities you own
-      // and only units/buildings (never resource nodes) — re-validated here;
-      // never trust the client. The client gates building deletion behind a
-      // confirm dialog, but the server is the authority.
+      // Destroy your own units or buildings. Only entities you own and only
+      // units/buildings (never resource nodes) — re-validated here; never trust
+      // the client. A still-under-construction building is a "blueprint": it is
+      // refunded in full (you can cancel a misplaced foundation for free).
+      // Completed buildings are NOT refunded (the client confirms those).
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
         const k = world.kind.get(id);
         if (!k || (!isUnit(k) && !isBuilding(k))) continue;
+        if (isBuilding(k) && !world.isOperational(id))
+          refund(world, playerId, BUILDING_STATS[k].cost);
         killEntity(world, id);
       }
       return;

@@ -26,9 +26,11 @@ export class ClientState {
   readonly selection = new Set<EntityId>();
 
   // Fog-of-war "explored" memory: 1 per tile that has ever been in own vision.
-  // Allocated lazily once mapTiles is known; in-memory only (resets on reload),
-  // matching the server's discovered-resources set. `exploredVersion` bumps when
-  // new tiles are explored so the minimap can rebuild its overlay only on change.
+  // Allocated lazily once mapTiles is known, or restored from localStorage on
+  // init so exploration survives reloads (see render/fogStore.ts; scoped per
+  // player+world). `exploredVersion` bumps when new tiles are explored so the
+  // minimap can rebuild its overlay only on change — and so the save throttle
+  // in main.ts knows when there's something new to persist.
   explored: Uint8Array | null = null;
   exploredVersion = 0;
 

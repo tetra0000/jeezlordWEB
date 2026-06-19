@@ -285,23 +285,27 @@ export class Input {
     return out;
   }
 
-  // Destroy the selected own units/buildings (no resource refund). Deleting a
-  // building is gated behind a confirm dialog (a stray Delete could wipe your
-  // Town Center); a units-only selection deletes instantly. Server re-validates.
+  // Destroy the selected own units/buildings. Deleting a COMPLETED building is
+  // gated behind a confirm dialog (a stray Delete could wipe your Town Center)
+  // and refunds nothing. Units and still-building "blueprints" delete instantly:
+  // a blueprint (construction not finished — it still has a `build` progress) is
+  // refunded in full by the server, so cancelling a misplaced foundation is free
+  // and needs no confirm. Server re-validates everything.
   private deleteSelected(): void {
     const ids = this.selectedOwnDeletable();
     if (ids.length === 0) return;
-    const buildings = ids.filter((id) => {
+    const completedBuildings = ids.filter((id) => {
       const e = this.state.entities.get(id);
-      return e && isBuilding(e.view.kind);
+      return e && isBuilding(e.view.kind) && e.view.build == null; // built, not a blueprint
     });
-    if (buildings.length === 0) {
+    if (completedBuildings.length === 0) {
+      // Only units and/or blueprints — instant + (for blueprints) refunded.
       this.sendDelete(ids);
       return;
     }
-    const bn = buildings.length;
-    const msg = `This will destroy ${ids.length} selected (including ${bn} building${bn === 1 ? '' : 's'}). ` +
-      `No resources are refunded and it cannot be undone.`;
+    const bn = completedBuildings.length;
+    const msg = `This will destroy ${ids.length} selected (including ${bn} finished building${bn === 1 ? '' : 's'}). ` +
+      `Finished buildings are not refunded and it cannot be undone.`;
     this.askConfirm('Delete buildings?', msg, () => this.sendDelete(ids));
   }
 

@@ -10,7 +10,7 @@
 // construction.ts — this system only decides WHAT each villager should target.
 // Runs first each tick (before pathfinding) so freshly-tasked villagers path the
 // same tick. Connection-agnostic, like every system.
-import { TILE } from '../../../shared/constants.js';
+import { MAP_PX, TILE } from '../../../shared/constants.js';
 import {
   BUILDING_STATS,
   IDLE_WARN_S,
@@ -105,6 +105,29 @@ function goIdle(world: World, id: EntityId, g: Gatherer): void {
 }
 
 function startTask(world: World, id: EntityId, g: Gatherer, tx: number, ty: number): void {
+  setMoveTarget(world, id, tx, ty);
+  world.markDirty(id);
+}
+
+// An idle villager with nothing to do strolls to a nearby random spot now and
+// then, so workless builders mill about instead of standing frozen. Cheap: each
+// villager only re-targets every few sim-seconds (paced by wanderCd), so this
+// never floods the bounded pathfinding queue. Only kicks in when truly idle and
+// not already walking somewhere.
+const WANDER_RADIUS = TILE * 5; // how far a stroll may wander from the current spot
+function maybeWander(world: World, id: EntityId, g: Gatherer, dt: number): void {
+  if (g.state !== 'idle') return;
+  const mv = world.movement.get(id);
+  if (mv?.target) return; // already strolling somewhere
+  g.wanderCd = (g.wanderCd ?? Math.random() * 4) - dt;
+  if (g.wanderCd > 0) return;
+  g.wanderCd = 4 + Math.random() * 6; // next stroll in 4–10 sim-seconds
+  const tf = world.transform.get(id);
+  if (!tf) return;
+  const ang = Math.random() * Math.PI * 2;
+  const r = WANDER_RADIUS * (0.3 + 0.7 * Math.random());
+  const tx = Math.min(MAP_PX - 1, Math.max(1, tf.x + Math.cos(ang) * r));
+  const ty = Math.min(MAP_PX - 1, Math.max(1, tf.y + Math.sin(ang) * r));
   setMoveTarget(world, id, tx, ty);
   world.markDirty(id);
 }
@@ -264,7 +287,7 @@ function assignWork(world: World, pid: PlayerId, ctx: PlayerCtx, id: EntityId, g
     }
     // Prefer finishing foundations; otherwise repair the nearest damaged building.
     const target = nearestFoundation(world, pid, id) ?? nearestRepair(world, pid, ctx, id);
-    if (target == null) { goIdle(world, id, g); g.idleTime += dt; return; }
+    if (target == null) { goIdle(world, id, g); g.idleTime += dt; maybeWander(world, id, g, dt); return; }
     g.state = 'building';
     g.buildTargetId = target;
     g.nodeId = null;
@@ -279,7 +302,7 @@ function assignWork(world: World, pid: PlayerId, ctx: PlayerCtx, id: EntityId, g
   // none yet).
   if (g.state !== 'idle') { g.idleTime = 0; return; }
   const node = nearestNode(world, ctx, g.job, id);
-  if (node == null) { g.idleTime += dt; return; }
+  if (node == null) { g.idleTime += dt; maybeWander(world, id, g, dt); return; }
   g.state = 'toNode';
   g.nodeId = node;
   g.buildTargetId = null;

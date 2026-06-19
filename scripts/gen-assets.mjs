@@ -330,6 +330,17 @@ function beach() {
   for (let i = 0; i < 90; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 3)], 150 + rnd() * 90);
   im.save('tile_beach');
 }
+function path() {
+  const im = new Img(32, 32);
+  let seed = 7321;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [122, 108, 84]); // packed dry earth
+  // Scattered cobbles (lighter/darker dirt + the odd grey stone) for a trodden
+  // courtyard-path look.
+  const specks = [[150, 134, 104], [98, 86, 64], [140, 138, 132]];
+  for (let i = 0; i < 80; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 3)], 150 + rnd() * 80);
+  im.save('tile_path');
+}
 function bridge() {
   const im = new Img(32, 32);
   im.rect(0, 0, 32, 32, [120, 82, 44]); // plank wood
@@ -401,6 +412,7 @@ bridge();
 mountain();
 mud();
 beach();
+path();
 
 fx('chop', (im) => { for (const [x, y] of [[6, 6], [9, 5], [7, 9], [10, 9]]) im.rect(x, y, 2, 2, [150, 100, 50]); });
 fx('spark', (im) => { im.line(3, 8, 13, 8, [255, 224, 90], 0); im.line(8, 3, 8, 13, [255, 224, 90], 0); im.circle(8, 8, 2, [255, 245, 180]); });

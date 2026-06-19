@@ -8,6 +8,7 @@ import { TICK_MS } from '../../shared/constants.js';
 import { jobsSystem } from './systems/jobs.js';
 import { pathfindingSystem } from './systems/pathfinding.js';
 import { movementSystem } from './systems/movement.js';
+import { separationSystem } from './systems/separation.js';
 import { gatherSystem } from './systems/gather.js';
 import { farmSystem } from './systems/farm.js';
 import { constructionSystem } from './systems/construction.js';
@@ -76,6 +77,7 @@ export class GameLoop {
     jobsSystem(this.world, DT);
     pathfindingSystem(this.world);
     movementSystem(this.world, DT);
+    separationSystem(this.world); // ease overlapping units apart (crowds, not blobs)
     gatherSystem(this.world, DT);
     farmSystem(this.world, DT);
     constructionSystem(this.world, DT);

@@ -39,11 +39,23 @@ export function nearTarget(world: World, vid: EntityId, targetId: EntityId): boo
   const tf = world.transform.get(vid);
   const tt = world.transform.get(targetId);
   if (!tf || !tt) return false;
+  const k = world.kind.get(targetId);
+  const isBld = !!k && isBuilding(k);
   const f = footprintOf(world, targetId);
   const half = (f * TILE) / 2;
   const dx = Math.max(0, Math.abs(tf.x - tt.x) - half);
   const dy = Math.max(0, Math.abs(tf.y - tt.y) - half);
-  if (Math.hypot(dx, dy) <= WORK_GAP + WORK_EPS) return true;
+  // Buildings also accept DIAGONAL-corner adjacency (Chebyshev box test): a
+  // builder/repairer that can only reach a corner tile of a big footprint — e.g.
+  // because the orthogonal tiles are taken by other builders or hemmed in by
+  // neighbouring buildings — still counts as "at the site". Without this a
+  // corner-stuck builder animates 'build' forever while progress never moves.
+  // Resource nodes stay strict (Euclidean) so you can't harvest a diagonal away.
+  if (isBld) {
+    if (Math.max(dx, dy) <= WORK_GAP + WORK_EPS) return true;
+  } else if (Math.hypot(dx, dy) <= WORK_GAP + WORK_EPS) {
+    return true;
+  }
   // Orthogonal edge-adjacency fallback: the villager's tile must share an edge
   // (not just a corner) with the footprint box.
   const x0 = Math.round(tt.x / TILE - f / 2);

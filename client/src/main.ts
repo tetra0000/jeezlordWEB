@@ -11,6 +11,7 @@ import { GameRenderer } from './render/app.js';
 import { loadAssets } from './render/assets.js';
 import { Minimap } from './render/minimap.js';
 import { PerfHud } from './render/perfHud.js';
+import { fogKey, loadExplored, saveExplored, clearExplored } from './render/fogStore.js';
 import { Camera } from './input/camera.js';
 import { Input } from './input/commands.js';
 import { sound, panAt, vary } from './audio/sound.js';
@@ -88,6 +89,16 @@ async function boot(): Promise<void> {
   let net!: Net;
   let input!: Input;
   let centered = false;
+  // Fog persistence: key for the current (player, world) and the last explored
+  // version we flushed to localStorage (saved throttled below + on unload).
+  let curFogKey: string | null = null;
+  let savedExploredVersion = 0;
+  const flushFog = (): void => {
+    if (curFogKey && state.explored && state.exploredVersion !== savedExploredVersion) {
+      saveExplored(curFogKey, state.explored);
+      savedExploredVersion = state.exploredVersion;
+    }
+  };
 
   const onMessage = (msg: ServerMsg): void => {
     switch (msg.t) {
@@ -117,6 +128,11 @@ async function boot(): Promise<void> {
         state.pop = msg.pop;
         state.terrain = decodeTerrainRLE(msg.terrain, msg.mapTiles * msg.mapTiles);
         state.reset();
+        // Restore previously-explored fog for this (player, world); resetExplored
+        // below rebuilds the canvas, which then re-syncs holes from state.explored.
+        curFogKey = fogKey(msg.playerId, msg.mapTiles, state.terrain);
+        state.explored = loadExplored(curFogKey, msg.mapTiles * msg.mapTiles);
+        savedExploredVersion = state.exploredVersion;
         centered = false;
         renderer.setMap(msg.mapTiles, msg.tile, state.terrain);
         camera.centerOn(MAP_PX / 2, MAP_PX / 2);
@@ -164,6 +180,9 @@ async function boot(): Promise<void> {
   // double-sends until that init arrives.
   restartBtn.addEventListener('click', () => {
     (restartBtn as HTMLButtonElement).disabled = true;
+    // Wiped + reseeded at a fresh spawn → forget the old life's explored fog
+    // before the server's fresh `init` (same world ⇒ same key) reloads it.
+    if (curFogKey) clearExplored(curFogKey);
     net.send({ t: 'restart' });
     setTimeout(() => ((restartBtn as HTMLButtonElement).disabled = false), 3000);
   });
@@ -189,7 +208,15 @@ async function boot(): Promise<void> {
 
   net.connect();
 
+  // Persist explored fog on tab hide/close (covers most reloads) and as a
+  // throttled safety net below in case the page is killed without firing these.
+  window.addEventListener('beforeunload', flushFog);
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushFog();
+  });
+
   let minimapAccum = 0;
+  let fogSaveAccum = 0;
   let overlayAccum = 1000; // force fog/territory to draw on the first frame
   renderer.app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
@@ -216,6 +243,14 @@ async function boot(): Promise<void> {
       overlayAccum = 0;
       renderer.territory.draw(state);
       renderer.fog.update(state);
+    }
+
+    // Flush newly-explored fog to localStorage at most every ~5s (cheap when
+    // nothing changed: flushFog no-ops unless exploredVersion advanced).
+    fogSaveAccum += ticker.deltaMS;
+    if (fogSaveAccum > 5000) {
+      fogSaveAccum = 0;
+      flushFog();
     }
 
     input.update();

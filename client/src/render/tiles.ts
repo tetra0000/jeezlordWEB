@@ -19,21 +19,36 @@ export function buildTileLayer(mapTiles: number, tile: number, terrain: Uint8Arr
     layer.addChild(bg);
   }
 
-  // Subtle ground variation so the repeating grass tile doesn't read as a uniform
-  // grid: a sparse scatter of faint lighter/darker patches, drawn once. Water /
+  // Ground variation so the repeating grass tile doesn't read as a uniform grid.
+  // Two passes, drawn once: large soft blobs that drift the hue across the map
+  // (warm yellow-green, cool blue-green, lush dark, dry tan), then a denser
+  // scatter of smaller lighter/darker patches for close-up texture. Water /
   // mountains / bridges are stamped on top below, so this only shows on grass.
   {
     const variation = new Graphics();
     let seed = 1337;
     const rnd = (): number => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-    const patches = Math.floor((mapTiles * mapTiles) / 45);
+    const pick = <T,>(arr: T[]): T => arr[Math.floor(rnd() * arr.length)];
+
+    // Pass 1 — broad hue drift: a few big, very soft blobs of differing tints.
+    const hues = [0x6e8c3e, 0x46724a, 0x2f4a30, 0x7a8a4a, 0x4a6e6a];
+    const bigBlobs = Math.max(6, Math.floor((mapTiles * mapTiles) / 600));
+    for (let i = 0; i < bigBlobs; i++) {
+      const x = rnd() * sizePx;
+      const y = rnd() * sizePx;
+      const r = 60 + rnd() * 140;
+      variation.ellipse(x, y, r, r * (0.6 + rnd() * 0.5)).fill({ color: pick(hues), alpha: 0.06 + rnd() * 0.06 });
+    }
+
+    // Pass 2 — fine texture: many small lighter/darker speckle patches.
+    const shades = [0x5c8048, 0x3a5234, 0x6f9450, 0x33482c, 0x5a6e3a];
+    const patches = Math.floor((mapTiles * mapTiles) / 22);
     for (let i = 0; i < patches; i++) {
       const x = rnd() * sizePx;
       const y = rnd() * sizePx;
-      const rx = 8 + rnd() * 18;
-      const ry = 6 + rnd() * 14;
-      const col = rnd() > 0.5 ? 0x5c8048 : 0x3a5234;
-      variation.ellipse(x, y, rx, ry).fill({ color: col, alpha: 0.05 + rnd() * 0.07 });
+      const rx = 6 + rnd() * 16;
+      const ry = 5 + rnd() * 12;
+      variation.ellipse(x, y, rx, ry).fill({ color: pick(shades), alpha: 0.05 + rnd() * 0.08 });
     }
     layer.addChild(variation);
   }

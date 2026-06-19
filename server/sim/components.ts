@@ -48,6 +48,9 @@ export interface Gatherer {
   // Sim-seconds this villager has gone without any work to do (job unsatisfiable
   // right now). Drives the "idle villagers" warning. In-memory only.
   idleTime: number;
+  // Sim-seconds until an idle villager picks a new short wander stroll (so they
+  // mill about instead of standing frozen). In-memory only.
+  wanderCd?: number;
 }
 
 export interface Construction {

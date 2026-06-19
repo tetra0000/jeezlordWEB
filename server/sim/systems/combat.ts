@@ -14,7 +14,7 @@ import type { EntityId, PlayerId } from '../../../shared/types.js';
 import type { World } from '../world.js';
 import { clearMove, setMoveTarget } from './movement.js';
 import { removeResourceNode } from './gather.js';
-import { spawnCorpse } from '../spawn.js';
+import { applyBuildingFootprint, spawnCorpse } from '../spawn.js';
 
 function isEnemyOf(world: World, owner: PlayerId, targetId: EntityId): boolean {
   const to = world.owner.get(targetId);
@@ -39,7 +39,7 @@ export function killEntity(world: World, id: EntityId): void {
     const tf = world.transform.get(id)!;
     const tileX = Math.round(tf.x / TILE - f / 2);
     const tileY = Math.round(tf.y / TILE - f / 2);
-    world.unblockFootprint(tileX, tileY, f);
+    applyBuildingFootprint(world, kind, tileX, tileY, -1);
   }
   world.remove(id);
 }

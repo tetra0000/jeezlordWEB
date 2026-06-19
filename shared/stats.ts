@@ -39,6 +39,14 @@ export interface BuildingStat {
   // grant 1 farmer each and ARE the workplace (no radius). See systems/jobs.ts.
   jobSlots?: Partial<Record<VillagerJob, number>>;
   gatherRadius?: number; // tiles
+  // Tile-occupancy modifiers (see server/sim/world.ts + spawn.applyBuildingFootprint):
+  //  - walkable: the footprint reserves build space but does NOT block unit
+  //    movement (units path over it) — farms and the resource drop-off camps.
+  //  - outline: a ring (this many tiles thick) of walkable, no-build "courtyard"
+  //    around the footprint — reserved so you can't build flush against it, but
+  //    units may walk it; rendered as a dirt path. Used by military buildings.
+  walkable?: boolean;
+  outline?: number; // tiles
 }
 
 export interface ResourceNodeStat {
@@ -66,20 +74,20 @@ export const UNIT_STATS: Record<string, UnitStat> = {
 export const BUILDING_STATS: Record<string, BuildingStat> = {
   // Town Center: trains villagers, big vision, accepts every resource. You start
   // with one; rebuildable (expensive) so losing it to a raid isn't fatal.
-  townCenter: { hp: 1000, vision: 7, footprint: 3, buildTime: 60, cost: { wood: 275, stone: 100 }, trains: ['villager'], popProvided: 8, accepts: ['wood', 'food', 'gold', 'stone'], gatherRadius: 12, jobSlots: { lumberjack: 2, stonemason: 2, goldminer: 2, forager: 2 } },
+  townCenter: { hp: 1000, vision: 7, footprint: 3, buildTime: 60, cost: { wood: 275, stone: 100 }, trains: ['villager'], popProvided: 8, accepts: ['wood', 'food', 'gold', 'stone'], gatherRadius: 12, jobSlots: { lumberjack: 2, stonemason: 2, goldminer: 2, forager: 2 }, outline: 1 },
   house: { hp: 250, vision: 4, footprint: 2, buildTime: 20, cost: { wood: 30 }, popProvided: 5 },
   // Resource-specific drop-off camps (cheap, place next to the resource). Each
   // also raises the matching job's capacity and opens a gather radius for it.
   mill: { hp: 300, vision: 4, footprint: 2, buildTime: 25, cost: { wood: 80 }, accepts: ['food'], gatherRadius: 9, jobSlots: { forager: 2 } },
-  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 2 } },
-  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 2, goldminer: 2 } },
-  farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 } },
+  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 2 }, walkable: true },
+  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 2, goldminer: 2 }, walkable: true },
+  farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 }, walkable: true },
   // Market: trade resources for gold (and back) at fluctuating prices. Not a
   // resource drop-off; its UI panel (shown when selected) is the trade desk.
   market: { hp: 500, vision: 4, footprint: 2, buildTime: 35, cost: { wood: 120, stone: 40 } },
-  barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['infantry', 'catapult'] },
-  range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer'] },
-  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scout', 'cavalry', 'horse'] },
+  barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['infantry', 'catapult'], outline: 1 },
+  range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer'], outline: 1 },
+  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scout', 'cavalry', 'horse'], outline: 1 },
   tower: { hp: 350, vision: 8, footprint: 1, buildTime: 40, cost: { wood: 50, stone: 125 }, attack: 8, range: 170, attackCooldown: 1.0 },
   wall: { hp: 900, vision: 2, footprint: 1, buildTime: 8, cost: { stone: 25 } },
 };

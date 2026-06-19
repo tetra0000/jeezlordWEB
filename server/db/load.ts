@@ -17,6 +17,7 @@ import {
 import type { EntityKind, ResourceType, VillagerJob } from '../../shared/types.js';
 import type { Db } from './db.js';
 import { World } from '../sim/world.js';
+import { applyBuildingFootprint } from '../sim/spawn.js';
 import type { TrainItem } from '../sim/components.js';
 
 export function loadWorld(db: Db, world: World): void {
@@ -93,7 +94,7 @@ export function loadWorld(db: Db, world: World): void {
       const f = BUILDING_STATS[kind].footprint;
       const tileX = Math.round(x / TILE - f / 2);
       const tileY = Math.round(y / TILE - f / 2);
-      world.blockFootprint(tileX, tileY, f);
+      applyBuildingFootprint(world, kind, tileX, tileY, 1);
       const c = constructById.get(id);
       world.construction.set(id, c
         ? { buildTime: c.build_time, elapsed: c.elapsed, complete: c.complete !== 0 }

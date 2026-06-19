@@ -94,11 +94,18 @@ export class Fog {
       if (e.view.owner !== state.playerId) continue;
       const vTiles = visionOf(e.view.kind);
       if (vTiles <= 0) continue;
-      this.visMask.circle(e.rx, e.ry, vTiles * TILE + TILE * 0.5);
+      // Use the authoritative position, NOT the interpolated render position
+      // (rx/ry): rx/ry only update while the entity is inside the camera
+      // viewport, so a scout off the edge of the screen would otherwise freeze
+      // its vision/explored footprint at the screen edge. view.x/view.y is
+      // current for every entity the server sent, on-screen or not.
+      const ex = e.view.x;
+      const ey = e.view.y;
+      this.visMask.circle(ex, ey, vTiles * TILE + TILE * 0.5);
       any = true;
       if (explored && mt > 0) {
-        const cx = Math.floor(e.rx / TILE);
-        const cy = Math.floor(e.ry / TILE);
+        const cx = Math.floor(ex / TILE);
+        const cy = Math.floor(ey / TILE);
         const r2 = vTiles * vTiles;
         for (let dy = -vTiles; dy <= vTiles; dy++) {
           const ty = cy + dy;

@@ -43,6 +43,36 @@ export function buildingCenter(tileX: number, tileY: number, footprint: number):
   return { x: (tileX + footprint / 2) * TILE, y: (tileY + footprint / 2) * TILE };
 }
 
+// Apply (sign=+1, on placement/load) or remove (sign=-1, on destruction) a
+// building's tile reservations on the World grids. The single source of truth
+// for how a building occupies tiles — used by spawnBuilding, killEntity and the
+// DB loader so the three stay in lockstep.
+//  - A normal building's footprint blocks movement (and thus building too).
+//  - A `walkable` building's footprint reserves build space only (units pass).
+//  - An `outline` ring around the footprint reserves build-only, walkable tiles
+//    (the military courtyard / path).
+export function applyBuildingFootprint(
+  world: World,
+  kind: EntityKind,
+  tileX: number,
+  tileY: number,
+  sign: number,
+): void {
+  const stat = BUILDING_STATS[kind];
+  const f = stat.footprint;
+  for (let dy = 0; dy < f; dy++)
+    for (let dx = 0; dx < f; dx++) {
+      if (stat.walkable) world.addNoBuild(tileX + dx, tileY + dy, sign);
+      else world.addBlock(tileX + dx, tileY + dy, sign);
+    }
+  const o = stat.outline ?? 0;
+  for (let dy = -o; dy < f + o; dy++)
+    for (let dx = -o; dx < f + o; dx++) {
+      if (dx >= 0 && dx < f && dy >= 0 && dy < f) continue; // footprint handled above
+      world.addNoBuild(tileX + dx, tileY + dy, sign);
+    }
+}
+
 export function spawnBuilding(
   world: World,
   kind: EntityKind,
@@ -55,7 +85,7 @@ export function spawnBuilding(
   const c = buildingCenter(tileX, tileY, stat.footprint);
   const hp = stat.hp;
   const id = world.spawn(kind, owner, c.x, c.y, hp, hp);
-  world.blockFootprint(tileX, tileY, stat.footprint);
+  applyBuildingFootprint(world, kind, tileX, tileY, 1);
   const buildTime = buildTimeOf(kind);
   world.construction.set(id, {
     buildTime,

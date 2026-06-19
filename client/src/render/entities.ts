@@ -263,6 +263,26 @@ export class EntityLayer {
       floor.height = TILE;
       node.addChild(floor);
     }
+    // Military buildings (barracks/range/stable) reserve a walkable, no-build
+    // courtyard ring around their footprint (BuildingStat.outline). Draw a dirt
+    // path over those ring tiles — a ground decal behind the body, created and
+    // destroyed with the building (like the tree's forest-floor patch).
+    if (isBuilding(kind) && tex.tile_path) {
+      const stat = BUILDING_STATS[kind];
+      const o = stat.outline ?? 0;
+      const f = stat.footprint;
+      for (let dy = -o; dy < f + o; dy++)
+        for (let dx = -o; dx < f + o; dx++) {
+          if (dx >= 0 && dx < f && dy >= 0 && dy < f) continue; // under the body
+          const path = new Sprite(tex.tile_path);
+          path.anchor.set(0.5, 0.5);
+          path.width = TILE;
+          path.height = TILE;
+          path.position.set((dx + 0.5 - f / 2) * TILE, (dy + 0.5 - f / 2) * TILE);
+          node.addChild(path);
+        }
+    }
+
     const body = new Sprite(tex[texKind]);
     body.anchor.set(0.5, 0.5);
     body.width = size;
