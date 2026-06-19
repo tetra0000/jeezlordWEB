@@ -25,6 +25,13 @@ export class ClientState {
   readonly entities = new Map<EntityId, ClientEntity>();
   readonly selection = new Set<EntityId>();
 
+  // Fog-of-war "explored" memory: 1 per tile that has ever been in own vision.
+  // Allocated lazily once mapTiles is known; in-memory only (resets on reload),
+  // matching the server's discovered-resources set. `exploredVersion` bumps when
+  // new tiles are explored so the minimap can rebuild its overlay only on change.
+  explored: Uint8Array | null = null;
+  exploredVersion = 0;
+
   // Admin mode (cheat panel) state, driven by server `adminState` messages.
   adminEnabled = false;
   adminReveal = false;
@@ -62,9 +69,12 @@ export class ClientState {
       const half = isBuilding(kind)
         ? (BUILDING_STATS[kind].footprint * TILE) / 2
         : KIND_STYLE[kind].size + 3;
-      const within = isBuilding(kind)
-        ? Math.abs(wx - e.view.x) <= half && Math.abs(wy - e.view.y) <= half
-        : Math.hypot(wx - e.view.x, wy - e.view.y) <= half;
+      // Cheap bounding-box reject first: skips the hypot for the vast majority
+      // of entities (matters under admin reveal, where every node is in state).
+      const dx = wx - e.view.x;
+      const dy = wy - e.view.y;
+      if (Math.abs(dx) > half || Math.abs(dy) > half) continue;
+      const within = isBuilding(kind) ? true : dx * dx + dy * dy <= half * half;
       if (within && half < bestHalf) {
         best = e;
         bestHalf = half;
@@ -77,5 +87,7 @@ export class ClientState {
     this.entities.clear();
     this.selection.clear();
     this.jobs = null;
+    this.explored = null;
+    this.exploredVersion = 0;
   }
 }

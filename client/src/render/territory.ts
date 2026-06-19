@@ -1,81 +1,81 @@
 // Territory overlay. A player's territory is the UNION of their town centers'
-// circles, so same-owner circles must read as one merged blob — not stacked
-// rings with crossing interior borders and double-darkened overlaps.
-//
-// Per owner we draw, into a reused slot:
-//   - fill:   every circle added to one path, filled once (nonzero winding =>
-//             overlaps merge with no seam and no alpha build-up),
-//   - stroke: every circle stroked, but masked by the INVERSE of the union
-//             shrunk by the border width, so only the outer boundary survives
-//             (arcs that fall inside another of the owner's circles vanish).
-// Different owners keep separate slots, so rival borders still cross where their
-// territories contest — only same-owner territory merges.
+// tile-discs — the set of grid tiles whose centre falls within a TC's radius
+// (the same centre-in-circle test the server uses for placement). The border is
+// drawn tile-aligned (blocky), tracing only the edges where an owned tile meets
+// a non-owned one, so same-owner discs merge into one outline and only the outer
+// boundary shows. Different owners keep separate slots, so rival borders cross
+// where their territories contest.
 import { Container, Graphics } from 'pixi.js';
-import { TILE } from '../../../shared/constants.js';
+import { MAP_TILES, TILE } from '../../../shared/constants.js';
+import { tileInTerritory, type TerritorySource } from '../../../shared/territory.js';
 import type { PlayerId } from '../../../shared/types.js';
 import type { ClientState } from '../state.js';
 import { ownerColor } from './colors.js';
 
-const BORDER_WIDTH = 2;
-
-interface Slot {
-  group: Container;
-  fill: Graphics;
-  stroke: Graphics;
-  mask: Graphics;
-}
+const BORDER_WIDTH = 3;
 
 export class TerritoryLayer {
   readonly container = new Container();
-  private readonly slots: Slot[] = [];
+  private readonly slots: Graphics[] = [];
 
-  private slot(i: number): Slot {
+  private slot(i: number): Graphics {
     if (this.slots[i]) return this.slots[i];
-    const group = new Container();
-    const fill = new Graphics();
-    const stroke = new Graphics();
-    const mask = new Graphics();
-    // The mask must live in the scene graph to take effect; it isn't drawn
-    // visibly when used as a mask. Inverse mask: stroke shows only OUTSIDE it.
-    group.addChild(fill, stroke, mask);
-    stroke.setMask?.({ mask, inverse: true });
-    this.container.addChild(group);
-    const s: Slot = { group, fill, stroke, mask };
-    this.slots[i] = s;
-    return s;
+    const g = new Graphics();
+    this.container.addChild(g);
+    this.slots[i] = g;
+    return g;
   }
 
   draw(state: ClientState): void {
-    // Group every visible town center's circle by owner.
-    const groups = new Map<PlayerId | null, Array<{ x: number; y: number; r: number }>>();
+    // Group every visible town center's territory by owner.
+    const groups = new Map<PlayerId | null, TerritorySource[]>();
     for (const e of state.entities.values()) {
       const v = e.view;
       if (v.kind !== 'townCenter' || !v.territory) continue;
       let arr = groups.get(v.owner);
       if (!arr) groups.set(v.owner, (arr = []));
-      arr.push({ x: v.x, y: v.y, r: v.territory * TILE });
+      arr.push({ x: v.x, y: v.y, radiusTiles: v.territory });
     }
 
     let i = 0;
-    for (const [owner, circles] of groups) {
-      const { group, fill, stroke, mask } = this.slot(i++);
-      const col = ownerColor(owner);
-      fill.clear();
-      stroke.clear();
-      mask.clear();
-      for (const c of circles) {
-        fill.circle(c.x, c.y, c.r);
-        stroke.circle(c.x, c.y, c.r);
-        // Shrink so a lone circle's whole stroke survives, while arcs buried in a
-        // neighbouring circle (well inside its radius) get masked away.
-        mask.circle(c.x, c.y, Math.max(0, c.r - BORDER_WIDTH));
+    for (const [owner, sources] of groups) {
+      const g = this.slot(i++);
+      g.clear();
+
+      // Owned tile set = union of the owner's TC tile-discs, scanned over the
+      // bounding box of all their TCs.
+      const owned = new Set<number>();
+      let minX = MAP_TILES, minY = MAP_TILES, maxX = 0, maxY = 0;
+      for (const s of sources) {
+        const R = Math.ceil(s.radiusTiles) + 1;
+        const cx = Math.floor(s.x / TILE);
+        const cy = Math.floor(s.y / TILE);
+        minX = Math.min(minX, cx - R); maxX = Math.max(maxX, cx + R);
+        minY = Math.min(minY, cy - R); maxY = Math.max(maxY, cy + R);
       }
-      fill.fill({ color: col, alpha: 0.08 });
-      stroke.stroke({ width: BORDER_WIDTH, color: col, alpha: 0.55 });
-      mask.fill(0xffffff);
-      group.visible = true;
+      minX = Math.max(0, minX); minY = Math.max(0, minY);
+      maxX = Math.min(MAP_TILES - 1, maxX); maxY = Math.min(MAP_TILES - 1, maxY);
+      for (let ty = minY; ty <= maxY; ty++)
+        for (let tx = minX; tx <= maxX; tx++)
+          if (tileInTerritory(sources, tx, ty)) owned.add(ty * MAP_TILES + tx);
+
+      // Stroke only the boundary edges (owned tile adjacent to a non-owned one);
+      // shared interior edges are skipped, merging same-owner discs.
+      const has = (tx: number, ty: number): boolean => owned.has(ty * MAP_TILES + tx);
+      for (const idx of owned) {
+        const tx = idx % MAP_TILES;
+        const ty = (idx - tx) / MAP_TILES;
+        const x = tx * TILE;
+        const y = ty * TILE;
+        if (!has(tx - 1, ty)) g.moveTo(x, y).lineTo(x, y + TILE);
+        if (!has(tx + 1, ty)) g.moveTo(x + TILE, y).lineTo(x + TILE, y + TILE);
+        if (!has(tx, ty - 1)) g.moveTo(x, y).lineTo(x + TILE, y);
+        if (!has(tx, ty + 1)) g.moveTo(x, y + TILE).lineTo(x + TILE, y + TILE);
+      }
+      g.stroke({ width: BORDER_WIDTH, color: ownerColor(owner), alpha: 0.85 });
+      g.visible = true;
     }
     // Hide any slots left over from a previous frame with more owners.
-    for (; i < this.slots.length; i++) this.slots[i].group.visible = false;
+    for (; i < this.slots.length; i++) this.slots[i].visible = false;
   }
 }

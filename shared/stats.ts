@@ -53,6 +53,10 @@ export const UNIT_STATS: Record<string, UnitStat> = {
   villager: { hp: 25, speed: 55, vision: 4, attack: 3, range: 20, attackCooldown: 1.5, trainTime: 20, trainedAt: 'townCenter', cost: { food: 50 }, pop: 1 },
   infantry: { hp: 45, speed: 60, vision: 5, attack: 6, range: 20, attackCooldown: 1.2, trainTime: 24, trainedAt: 'barracks', cost: { food: 60, gold: 20 }, pop: 1 },
   archer: { hp: 30, speed: 60, vision: 6, attack: 5, range: 130, attackCooldown: 1.5, trainTime: 26, trainedAt: 'range', cost: { wood: 40, gold: 30 }, pop: 1 },
+  // Scout: a fast, cheap mounted recon unit — very high vision, very low attack.
+  // For exploring/spotting, not fighting. Trained at the stable; every player
+  // starts with one (see net/session.ts).
+  scout: { hp: 45, speed: 95, vision: 11, attack: 2, range: 20, attackCooldown: 2.0, trainTime: 18, trainedAt: 'stable', cost: { food: 60 }, pop: 1 },
   cavalry: { hp: 80, speed: 70, vision: 5, attack: 9, range: 22, attackCooldown: 1.3, trainTime: 32, trainedAt: 'stable', cost: { food: 70, gold: 30 }, pop: 1 },
   horse: { hp: 110, speed: 95, vision: 6, attack: 11, range: 24, attackCooldown: 1.2, trainTime: 40, trainedAt: 'stable', cost: { food: 80, gold: 50 }, pop: 2 },
   catapult: { hp: 50, speed: 35, vision: 6, attack: 45, range: 220, attackCooldown: 4, trainTime: 80, trainedAt: 'barracks', cost: { wood: 160, gold: 80 }, pop: 3 },
@@ -72,7 +76,7 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 } },
   barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['infantry', 'catapult'] },
   range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer'] },
-  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['cavalry', 'horse'] },
+  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scout', 'cavalry', 'horse'] },
   tower: { hp: 350, vision: 8, footprint: 1, buildTime: 40, cost: { wood: 50, stone: 125 }, attack: 8, range: 170, attackCooldown: 1.0 },
   wall: { hp: 900, vision: 2, footprint: 1, buildTime: 8, cost: { stone: 25 } },
 };
@@ -103,6 +107,11 @@ export const TERRITORY_MIN_TILES = 10;
 export const TERRITORY_MAX_TILES = 15;
 export const TERRITORY_GROW_TIME_S = 2 * 3600; // seconds to grow MIN -> MAX
 
+// Units slowly regenerate health while standing in their own territory. A
+// deliberate, slow recovery to match the multi-day pacing — 1 hp per minute.
+// SIM-seconds, so TIME_SCALE fast-forwards it in tests.
+export const HEAL_RATE_PER_S = 1 / 60;
+
 // Construction requires a villager: a placed building is a foundation that only
 // advances while at least one of the owner's villagers is building it. Build
 // time is also stretched a touch (see BUILD_DURATION_SCALE).
@@ -111,6 +120,13 @@ export const BUILD_DURATION_SCALE = 1.025; // +2.5% to every building's build ti
 export function buildTimeOf(kind: EntityKind): number {
   return isBuilding(kind) ? BUILDING_STATS[kind].buildTime * BUILD_DURATION_SCALE : 0;
 }
+
+// Builders also repair damaged, completed buildings/walls inside their territory.
+// One builder restores a full health bar in REPAIR_TIME_S sim-seconds (scaled by
+// maxHp, so every building repairs in the same time); more builders are faster
+// with the same diminishing returns as construction. Sim-seconds → TIME_SCALE
+// fast-forwards it.
+export const REPAIR_TIME_S = 180;
 
 // --- helpers ---------------------------------------------------------------
 export const UNIT_KINDS = Object.keys(UNIT_STATS) as EntityKind[];

@@ -1,7 +1,7 @@
 // Client entrypoint: wires the login UI, the network layer, the Pixi renderer,
 // and the per-frame update loop (camera + entity interpolation + fog + minimap
 // + HUD).
-import { MAP_PX } from '../../shared/constants.js';
+import { MAP_PX, TILE } from '../../shared/constants.js';
 import { decodeTerrainRLE } from '../../shared/terrain.js';
 import { isBuilding, isResourceNode } from '../../shared/stats.js';
 import type { DeltaMsg, ServerMsg } from '../../shared/protocol.js';
@@ -173,7 +173,18 @@ async function boot(): Promise<void> {
   renderer.app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
     camera.update(dt);
-    renderer.entities.frame(state, dt);
+
+    // Padded camera rect in world px — drives entity viewport culling so render
+    // cost tracks what's on screen, not the (fog-revealed) whole-world count.
+    const tl = renderer.screenToWorld(0, 0);
+    const br = renderer.screenToWorld(renderer.screenWidth, renderer.screenHeight);
+    const pad = TILE * 4; // cover large building footprints + reduce pan pop-in
+    renderer.entities.frame(state, dt, {
+      minX: tl.x - pad,
+      minY: tl.y - pad,
+      maxX: br.x + pad,
+      maxY: br.y + pad,
+    });
 
     // Fog + territory barely change frame-to-frame and each rebuild their
     // Graphics geometry over a full scan of the world, so refresh them at ~20 Hz

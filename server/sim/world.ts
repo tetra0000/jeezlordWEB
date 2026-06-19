@@ -2,7 +2,7 @@
 // player registry. Sim systems mutate this; persistence flushes it; snapshots
 // read from it. In-RAM is the source of truth at runtime.
 import type { Action, EntityId, EntityKind, EntityView, PlayerId } from '../../shared/types.js';
-import { MAP_TILES, TILE, TERRAIN_WATER } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_WATER, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
 import {
   BASE_POP_CAP,
   BUILDING_STATS,
@@ -84,9 +84,11 @@ export class World {
   isBlockedTile(tx: number, ty: number): boolean {
     if (!this.inBounds(tx, ty)) return true;
     const i = this.tileIndex(tx, ty);
-    // Water is impassable terrain; a bridge tile sits over water but is passable
-    // (so it's never treated as water here). Dynamic blockers stack on top.
-    if (this.terrain[i] === TERRAIN_WATER) return true;
+    // Water and mountains are impassable terrain; a bridge tile sits over water
+    // but is passable (so it's never treated as water here). Dynamic blockers
+    // stack on top.
+    const t = this.terrain[i];
+    if (t === TERRAIN_WATER || t === TERRAIN_MOUNTAIN) return true;
     return this.blocked[i] > 0;
   }
   terrainAt(tx: number, ty: number): number {
@@ -184,7 +186,11 @@ export class World {
       owner: this.owner.get(id) ?? null,
       x: tf.x,
       y: tf.y,
-      hp: hp.hp,
+      // Rounded on the wire: internal hp is fractional (slow healing accrues
+      // sub-hp each tick), but the snapshot diff should only fire when the
+      // displayed whole-hp changes — not every tick. Damage is integer, so this
+      // never affects combat readouts.
+      hp: Math.round(hp.hp),
       maxHp: hp.maxHp,
     };
     const c = this.construction.get(id);
@@ -224,6 +230,17 @@ export class World {
     // Current activity (drives client animation + tooltip). Omitted when idle.
     const action = this.actionOf(id);
     if (action !== 'idle') v.action = action;
+
+    // Remaining move waypoints, so the owner's client can draw the planned path
+    // for selected units. Owner-only (stripped for other viewers in snapshot).
+    const mv = this.movement.get(id);
+    if (mv) {
+      const pts = mv.pathIndex >= 0 && mv.pathIndex < mv.path.length ? mv.path.slice(mv.pathIndex) : [];
+      // Append queued shift-waypoints so the path line previews the whole route
+      // (these are raw destinations, not yet pathfound — a straight-segment hint).
+      if (mv.waypoints && mv.waypoints.length > 0) for (const w of mv.waypoints) pts.push({ x: w.x, y: w.y });
+      if (pts.length > 0) v.path = pts;
+    }
     return v;
   }
 

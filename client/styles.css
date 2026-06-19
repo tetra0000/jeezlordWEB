@@ -213,6 +213,14 @@ button:active {
   background: #4a6a3a;
   border-color: #8ad06a;
 }
+#command-panel button.danger {
+  background: #3a1c1c;
+  border-color: #a05050;
+  color: #ffd9d9;
+}
+#command-panel button.danger:hover {
+  background: #5a2626;
+}
 #command-panel button .cost {
   display: block;
   font-size: 10px;

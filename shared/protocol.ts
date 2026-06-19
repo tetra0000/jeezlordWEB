@@ -41,6 +41,7 @@ export interface MoveMsg {
   unitIds: EntityId[];
   x: number;
   y: number;
+  queue?: boolean; // shift-click: append as a waypoint instead of replacing the order
 }
 
 // Place a building (server validates cost, free tiles, ownership). Construction
@@ -107,6 +108,13 @@ export interface StopMsg {
   unitIds: EntityId[];
 }
 
+// Delete (destroy) one or more of your OWN units. No resources are refunded.
+// Server validates each id is an owned unit (buildings are not deletable here).
+export interface DeleteMsg {
+  t: 'delete';
+  unitIds: EntityId[];
+}
+
 // Admin/cheat actions. Only honoured for a player who has enabled admin mode
 // (by renaming one of their town centers to "adminmode"). Server re-checks the
 // flag before applying — the message alone grants nothing.
@@ -128,6 +136,7 @@ export type ClientMsg =
   | RenameMsg
   | FarmReseedMsg
   | StopMsg
+  | DeleteMsg
   | AdminMsg;
 
 // ---------------------------------------------------------------------------

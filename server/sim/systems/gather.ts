@@ -27,10 +27,14 @@ function footprintOf(world: World, id: EntityId): number {
   return 1;
 }
 
-// True when the villager is within WORK_GAP of the target's footprint (measured
-// to the nearest edge of the footprint box). A pathfinder that can only reach a
-// diagonal tile beside a fully-surrounded target would otherwise sit just out of
-// reach, so 8-tile-adjacency to the footprint also counts (anti-stuck).
+// True when the villager is right up against the target's footprint. Primary
+// test: the distance from the villager to the nearest edge of the footprint box
+// is within WORK_GAP (half a tile, plus a small epsilon for float jitter) — this
+// is satisfied by standing on an ORTHOGONALLY-adjacent tile, but not a diagonal
+// one (which reads as a tile away). Fallback: orthogonal edge-adjacency of tiles,
+// for anti-stuck robustness when the villager isn't exactly tile-centred. A
+// diagonal/corner position no longer counts (was the "works from a tile away" bug).
+const WORK_EPS = 2; // px slack so exact orthogonal adjacency (=WORK_GAP) is robust
 export function nearTarget(world: World, vid: EntityId, targetId: EntityId): boolean {
   const tf = world.transform.get(vid);
   const tt = world.transform.get(targetId);
@@ -39,13 +43,18 @@ export function nearTarget(world: World, vid: EntityId, targetId: EntityId): boo
   const half = (f * TILE) / 2;
   const dx = Math.max(0, Math.abs(tf.x - tt.x) - half);
   const dy = Math.max(0, Math.abs(tf.y - tt.y) - half);
-  if (Math.hypot(dx, dy) <= WORK_GAP + 1) return true;
-  // Tile-adjacency fallback.
+  if (Math.hypot(dx, dy) <= WORK_GAP + WORK_EPS) return true;
+  // Orthogonal edge-adjacency fallback: the villager's tile must share an edge
+  // (not just a corner) with the footprint box.
   const x0 = Math.round(tt.x / TILE - f / 2);
   const y0 = Math.round(tt.y / TILE - f / 2);
   const vx = Math.floor(tf.x / TILE);
   const vy = Math.floor(tf.y / TILE);
-  return vx >= x0 - 1 && vx <= x0 + f && vy >= y0 - 1 && vy <= y0 + f;
+  const insideCols = vx >= x0 && vx <= x0 + f - 1;
+  const insideRows = vy >= y0 && vy <= y0 + f - 1;
+  const edgeLeftRight = (vx === x0 - 1 || vx === x0 + f) && insideRows;
+  const edgeTopBottom = (vy === y0 - 1 || vy === y0 + f) && insideCols;
+  return edgeLeftRight || edgeTopBottom;
 }
 
 // Nearest owned, operational building that accepts the given resource type.
@@ -95,9 +104,15 @@ export function gatherSystem(world: World, dt: number): void {
 
       case 'building': {
         // Walk to the assisted building and stand there (animates as 'build').
-        // Construction auto-progresses; once done/gone the villager goes idle.
+        // Construction (foundation) or repair (completed building below max HP)
+        // auto-progresses; once it's gone or fully built+repaired, go idle.
         const bId = g.buildTargetId;
-        if (bId == null || !world.has(bId) || world.isOperational(bId)) {
+        let done = bId == null || !world.has(bId);
+        if (!done && world.isOperational(bId!)) {
+          const h = world.health.get(bId!);
+          done = !h || h.hp >= h.maxHp; // operational and at full HP — nothing to do
+        }
+        if (done) {
           g.state = 'idle';
           g.buildTargetId = null;
           const mv = world.movement.get(id);
@@ -105,7 +120,7 @@ export function gatherSystem(world: World, dt: number): void {
           world.markDirty(id);
           break;
         }
-        if (nearTarget(world, id, bId)) {
+        if (nearTarget(world, id, bId!)) {
           const mv = world.movement.get(id);
           if (mv && mv.target) clearMove(mv);
         }

@@ -14,6 +14,7 @@ import { constructionSystem } from './systems/construction.js';
 import { territorySystem } from './systems/territory.js';
 import { trainingSystem } from './systems/training.js';
 import { combatSystem } from './systems/combat.js';
+import { healSystem } from './systems/heal.js';
 import type { World } from './world.js';
 
 const MAX_CATCHUP_STEPS = 5;
@@ -79,6 +80,7 @@ export class GameLoop {
     territorySystem(this.world, DT);
     trainingSystem(this.world, DT);
     combatSystem(this.world, DT);
+    healSystem(this.world, DT);
     this.onTick(this.tick);
   }
 }

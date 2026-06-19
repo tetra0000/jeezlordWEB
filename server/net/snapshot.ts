@@ -4,13 +4,20 @@
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
 import type { DeltaMsg } from '../../shared/protocol.js';
-import type { EntityId, EntityView, JobReport, Pop, Stockpile } from '../../shared/types.js';
+import type { EntityId, EntityView, JobReport, Pop, Stockpile, Vec2 } from '../../shared/types.js';
 import type { Session } from './session.js';
 import type { World } from '../sim/world.js';
 import { MAP_TILES, TILE } from '../../shared/constants.js';
 import { isResourceNode } from '../../shared/stats.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
 import { jobReport } from '../sim/systems/jobs.js';
+
+function pathChanged(a?: Vec2[], b?: Vec2[]): boolean {
+  if (!a && !b) return false;
+  if (!a || !b || a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) if (a[i].x !== b[i].x || a[i].y !== b[i].y) return true;
+  return false;
+}
 
 function viewChanged(a: EntityView, b: EntityView): boolean {
   return (
@@ -30,7 +37,8 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.territory !== b.territory ||
     a.name !== b.name ||
     a.farmAuto !== b.farmAuto ||
-    a.job !== b.job
+    a.job !== b.job ||
+    pathChanged(a.path, b.path)
   );
 }
 
@@ -75,6 +83,7 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
         if (v.rally) delete v.rally;
         if (v.farmAuto !== undefined) delete v.farmAuto;
         if (v.job !== undefined) delete v.job;
+        if (v.path) delete v.path;
       }
       out.set(id, v);
     }

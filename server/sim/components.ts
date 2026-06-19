@@ -25,6 +25,15 @@ export interface Movement {
   path: Vec2[]; // pathfound waypoints (in-memory only; recomputed on load)
   pathIndex: number; // -1 = needs a path
   repathCooldown: number; // s until allowed to repath after a failure
+  // True when `path` only reaches the closest tile we could (goal unreachable or
+  // over the A* budget). On arrival the mover re-plans from there to keep
+  // closing the distance, instead of stopping or cutting through walls.
+  // In-memory only (like `path`).
+  partial?: boolean;
+  // Queued future destinations (shift-clicked waypoints). On reaching `target`
+  // the next one is popped into `target`. In-memory only — a manual micro queue,
+  // not worth persisting; a restart just resumes the current `target`.
+  waypoints?: Vec2[];
 }
 
 export interface Gatherer {

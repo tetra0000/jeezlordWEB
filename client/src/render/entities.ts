@@ -12,13 +12,24 @@ import { ownerColor } from './colors.js';
 import { tex } from './assets.js';
 import { sound, type SoundName, panAt, vary } from '../audio/sound.js';
 
+// Padded camera rect in world px; entities outside it are not rendered.
+export interface Viewport {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
 interface Sprite_ {
   node: Container;
   body: Sprite;
-  ring: Graphics;
-  hpBg: Graphics;
-  hpFg: Graphics;
-  prog: Graphics;
+  // Overlay graphics are created lazily and skipped entirely for resource nodes
+  // (the bulk of the world): they're never selected, damaged, or built/trained,
+  // so they need none of these — saving 4 Graphics per node under admin reveal.
+  ring?: Graphics;
+  hpBg?: Graphics;
+  hpFg?: Graphics;
+  prog?: Graphics;
   label?: Text; // town-center name label
   half: number;
   phase: number; // per-entity animation offset
@@ -58,6 +69,21 @@ function displaySize(kind: EntityKind): number {
   return UNIT_SIZE;
 }
 
+// Draw order within the shared entity container (higher = on top). Resource
+// nodes / ground items sit lowest, buildings above them, and units on top of
+// everything so they're never hidden behind a building or a tree.
+const Z_GROUND = 0; // fx particles, rally lines, command pings
+const Z_RESOURCE = 1;
+const Z_BUILDING = 2;
+const Z_UNIT = 3;
+const Z_PATH = 4; // planned move path, drawn over units so it stays visible
+
+function zIndexFor(kind: EntityKind): number {
+  if (isResourceNode(kind)) return Z_RESOURCE;
+  if (isBuilding(kind)) return Z_BUILDING;
+  return Z_UNIT;
+}
+
 // Which fx sprite + cadence each work action uses.
 const FX_FOR: Partial<Record<Action, string>> = {
   gatherWood: 'fx_chop',
@@ -83,6 +109,7 @@ export class EntityLayer {
   readonly container = new Container();
   private readonly fxLayer = new Container();
   private readonly rallyG = new Graphics(); // rally flags for selected buildings
+  private readonly pathG = new Graphics(); // planned move paths for selected units
   private readonly sprites = new Map<EntityId, Sprite_>();
   private readonly effects: Effect[] = [];
   private readonly pings: Ping[] = [];
@@ -90,8 +117,16 @@ export class EntityLayer {
   private t = 0;
 
   constructor() {
+    // Depth is by zIndex (set per-entity in create()), not insertion order, so
+    // units always draw over buildings/resources regardless of when each sprite
+    // was lazily created on entering the viewport.
+    this.container.sortableChildren = true;
+    this.fxLayer.zIndex = Z_GROUND;
+    this.rallyG.zIndex = Z_GROUND;
+    this.pathG.zIndex = Z_PATH;
     this.container.addChild(this.fxLayer);
     this.container.addChild(this.rallyG);
+    this.container.addChild(this.pathG);
   }
 
   // Draw a rally flag (+ a line from the building) for every selected own
@@ -111,33 +146,72 @@ export class EntityLayer {
     }
   }
 
+  // Draw the planned move path (server-sent remaining waypoints) for every
+  // selected own unit, from its current render position through each waypoint,
+  // with a small ring at the destination.
+  private drawPaths(state: ClientState): void {
+    const g = this.pathG;
+    g.clear();
+    for (const id of state.selection) {
+      const e = state.entities.get(id);
+      const path = e?.view.path;
+      if (!e || !path || path.length === 0) continue;
+      g.moveTo(e.rx, e.ry);
+      for (const p of path) g.lineTo(p.x, p.y);
+      g.stroke({ width: 2, color: 0x8ad06a, alpha: 0.55 });
+      const dest = path[path.length - 1];
+      g.circle(dest.x, dest.y, 4).stroke({ width: 2, color: 0x8ad06a, alpha: 0.8 });
+    }
+  }
+
   private create(state: ClientState, id: EntityId): Sprite_ {
     const e = state.entities.get(id)!;
     const kind = e.view.kind;
     const size = displaySize(kind);
     const half = size / 2;
+    const resource = isResourceNode(kind);
+    // The entity may have moved while culled (sprite absent); snap the render
+    // position to the authoritative target so it doesn't slide in from a stale
+    // spot when it re-enters the viewport.
+    e.rx = e.view.x;
+    e.ry = e.view.y;
 
     const node = new Container();
+    // Trees sit on a patch of forest floor (drawn behind the trunk, tile-sized).
+    // It's a child of the node, so it's created/removed with the tree.
+    if (kind === 'tree' && tex.tile_forestground) {
+      const floor = new Sprite(tex.tile_forestground);
+      floor.anchor.set(0.5, 0.5);
+      floor.width = TILE;
+      floor.height = TILE;
+      node.addChild(floor);
+    }
     const body = new Sprite(tex[kind]);
     body.anchor.set(0.5, 0.5);
     body.width = size;
     body.height = size;
-    if (isBuilding(kind) || (!isResourceNode(kind))) body.tint = ownerColor(e.view.owner);
+    if (isBuilding(kind) || !resource) body.tint = ownerColor(e.view.owner);
     node.addChild(body);
 
-    const ring = new Graphics();
-    if (isBuilding(kind)) ring.rect(-half - 2, -half - 2, half * 2 + 4, half * 2 + 4).stroke({ width: 2, color: 0xffffff });
-    else ring.circle(0, 0, half + 3).stroke({ width: 2, color: 0xffffff });
-    ring.visible = false;
-    node.addChild(ring);
+    let ring: Graphics | undefined;
+    let hpBg: Graphics | undefined;
+    let hpFg: Graphics | undefined;
+    let prog: Graphics | undefined;
+    if (!resource) {
+      ring = new Graphics();
+      if (isBuilding(kind)) ring.rect(-half - 2, -half - 2, half * 2 + 4, half * 2 + 4).stroke({ width: 2, color: 0xffffff });
+      else ring.circle(0, 0, half + 3).stroke({ width: 2, color: 0xffffff });
+      ring.visible = false;
+      node.addChild(ring);
 
-    const hpBg = new Graphics();
-    hpBg.rect(-half, -half - 8, half * 2, 4).fill(0x000000);
-    hpBg.visible = false;
-    const hpFg = new Graphics();
-    const prog = new Graphics();
-    prog.visible = false;
-    node.addChild(hpBg, hpFg, prog);
+      hpBg = new Graphics();
+      hpBg.rect(-half, -half - 8, half * 2, 4).fill(0x000000);
+      hpBg.visible = false;
+      hpFg = new Graphics();
+      prog = new Graphics();
+      prog.visible = false;
+      node.addChild(hpBg, hpFg, prog);
+    }
 
     let label: Text | undefined;
     if (kind === 'townCenter') {
@@ -151,6 +225,7 @@ export class EntityLayer {
       node.addChild(label);
     }
 
+    node.zIndex = zIndexFor(kind);
     this.container.addChild(node);
     const s: Sprite_ = {
       node, body, ring, hpBg, hpFg, prog, label, half,
@@ -281,7 +356,7 @@ export class EntityLayer {
     }
   }
 
-  frame(state: ClientState, dtSeconds: number): void {
+  frame(state: ClientState, dtSeconds: number, view: Viewport): void {
     this.t += dtSeconds;
 
     for (const id of this.sprites.keys()) {
@@ -293,6 +368,20 @@ export class EntityLayer {
 
     const k = Math.min(1, dtSeconds * INTERP_RATE);
     for (const [id, e] of state.entities) {
+      // Viewport culling: entities outside the (padded) camera rect get no
+      // sprite and skip all per-frame work, so cost scales with what's on
+      // screen — not with world size. This is what keeps admin-reveal (which
+      // unfogs the entire map's entities) from tanking the frame rate.
+      const v = e.view;
+      if (v.x < view.minX || v.x > view.maxX || v.y < view.minY || v.y > view.maxY) {
+        const existing = this.sprites.get(id);
+        if (existing) {
+          existing.node.destroy({ children: true });
+          this.sprites.delete(id);
+        }
+        continue;
+      }
+
       let s = this.sprites.get(id);
       if (!s) s = this.create(state, id);
 
@@ -301,7 +390,7 @@ export class EntityLayer {
       s.node.x = e.rx;
       s.node.y = e.ry;
 
-      s.ring.visible = state.selection.has(id);
+      if (s.ring) s.ring.visible = state.selection.has(id);
 
       const building = e.view.build;
       s.node.alpha = building != null ? 0.45 + 0.45 * building : 1;
@@ -313,26 +402,29 @@ export class EntityLayer {
       // Health bar — only rebuild the geometry when it actually changes. Most
       // entities (every resource node, every idle building) sit at full hp, so
       // this skips a per-frame Graphics rebuild across the whole world.
-      const ratio = e.view.maxHp > 0 ? e.view.hp / e.view.maxHp : 1;
-      const showHp = (ratio < 0.999 && building == null) || state.selection.has(id);
-      if (showHp !== s.hpShown || (showHp && Math.abs(ratio - s.hpRatio) > 0.002)) {
-        s.hpShown = showHp;
-        s.hpRatio = ratio;
-        s.hpBg.visible = showHp;
-        if (showHp) {
-          const w = s.half * 2 * Math.max(0, ratio);
-          const col = ratio > 0.5 ? 0x4ad96a : ratio > 0.25 ? 0xd9c14a : 0xd94a4a;
-          s.hpFg.clear().rect(-s.half, -s.half - 8, w, 4).fill(col);
-        } else {
-          s.hpFg.clear();
+      if (s.hpBg && s.hpFg) {
+        const ratio = e.view.maxHp > 0 ? e.view.hp / e.view.maxHp : 1;
+        const showHp = (ratio < 0.999 && building == null) || state.selection.has(id);
+        if (showHp !== s.hpShown || (showHp && Math.abs(ratio - s.hpRatio) > 0.002)) {
+          s.hpShown = showHp;
+          s.hpRatio = ratio;
+          s.hpBg.visible = showHp;
+          if (showHp) {
+            const w = s.half * 2 * Math.max(0, ratio);
+            const col = ratio > 0.5 ? 0x4ad96a : ratio > 0.25 ? 0xd9c14a : 0xd94a4a;
+            s.hpFg.clear().rect(-s.half, -s.half - 8, w, 4).fill(col);
+          } else {
+            s.hpFg.clear();
+          }
         }
       }
 
       // Progress bar: construction (blue) or training (yellow). Keyed on the
       // percentage so it redraws at the sim rate (~10 Hz), not every frame.
-      const progKey = building != null ? `b${building.toFixed(3)}`
+      const progKey = !s.prog ? ''
+        : building != null ? `b${building.toFixed(3)}`
         : e.view.train ? `t${e.view.train.pct.toFixed(3)}` : '';
-      if (progKey !== s.progKey) {
+      if (s.prog && progKey !== s.progKey) {
         s.progKey = progKey;
         if (building != null) {
           s.prog.visible = true;
@@ -365,6 +457,7 @@ export class EntityLayer {
     }
 
     this.drawRallyFlags(state);
+    this.drawPaths(state);
 
     // Advance + cull effect particles.
     for (let i = this.effects.length - 1; i >= 0; i--) {

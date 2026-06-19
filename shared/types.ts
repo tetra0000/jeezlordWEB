@@ -14,6 +14,7 @@ export type EntityKind =
   | 'villager'
   | 'infantry'
   | 'archer'
+  | 'scout'
   | 'cavalry'
   | 'horse'
   | 'catapult'
@@ -86,6 +87,7 @@ export interface EntityView {
   name?: string; // town centers: player-given name
   farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
+  path?: Vec2[]; // units: remaining move waypoints in world px (sent to the owner only)
 }
 
 export interface Pop {

@@ -4,6 +4,10 @@
 // (AoE2-style) so swarms help but don't trivialise big builds. If every builder
 // leaves, progress pauses (no decay). Completion makes the building operational
 // (gains vision, drop-site, training, towers, territory).
+//
+// The same builder presence also REPAIRS completed buildings/walls that are
+// below max HP (jobs.ts tasks idle builders to damaged buildings in territory).
+import { REPAIR_TIME_S } from '../../../shared/stats.js';
 import type { EntityId } from '../../../shared/types.js';
 import type { World } from '../world.js';
 import { nearTarget } from './gather.js';
@@ -24,17 +28,26 @@ export function constructionSystem(world: World, dt: number): void {
       builders.set(g.buildTargetId, (builders.get(g.buildTargetId) ?? 0) + 1);
   }
 
-  for (const [id, c] of world.construction) {
-    if (c.complete) continue;
-    const n = builders.get(id) ?? 0;
-    if (n === 0) continue; // no builder present — construction is paused
-    c.elapsed += dt * buildPower(n);
-    world.markDirty(id);
-    if (c.elapsed >= c.buildTime) {
-      c.complete = true;
-      // Full HP on completion (it was placed at full HP; this is a safety net).
+  // Only sites with a builder present advance (construct) or get repaired; with
+  // none, progress simply pauses (no decay).
+  for (const [id, n] of builders) {
+    const c = world.construction.get(id);
+    if (c && !c.complete) {
+      // Construction: advance toward completion.
+      c.elapsed += dt * buildPower(n);
+      world.markDirty(id);
+      if (c.elapsed >= c.buildTime) {
+        c.complete = true;
+        const hp = world.health.get(id);
+        if (hp) hp.hp = hp.maxHp;
+      }
+    } else {
+      // Repair: a completed building/wall below max HP regains health.
       const hp = world.health.get(id);
-      if (hp) hp.hp = hp.maxHp;
+      if (hp && hp.hp < hp.maxHp) {
+        hp.hp = Math.min(hp.maxHp, hp.hp + (hp.maxHp / REPAIR_TIME_S) * buildPower(n) * dt);
+        world.markDirty(id);
+      }
     }
   }
 }

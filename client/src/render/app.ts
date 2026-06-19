@@ -32,6 +32,7 @@ export class GameRenderer {
   setMap(mapTiles: number, tile: number, terrain: Uint8Array | null): void {
     this.tileHolder.removeChildren();
     this.tileHolder.addChild(buildTileLayer(mapTiles, tile, terrain));
+    this.fog.resetExplored(); // new map — forget previously-explored area
   }
 
   screenToWorld(sx: number, sy: number): { x: number; y: number } {

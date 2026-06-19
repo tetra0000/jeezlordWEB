@@ -87,13 +87,21 @@ function nearestFree(world: World, gx: number, gy: number): { x: number; y: numb
   return null;
 }
 
+// Result of a path request. `partial` is true when the path stops short of the
+// goal (unreachable, or the search hit its budget) and only reaches the closest
+// tile found — the caller re-plans from there rather than stranding the unit.
+export interface PathResult {
+  path: Vec2[];
+  partial: boolean;
+}
+
 export function findPath(
   world: World,
   sxPx: number,
   syPx: number,
   gxPx: number,
   gyPx: number,
-): Vec2[] | null {
+): PathResult | null {
   const sx = toTile(sxPx);
   const sy = toTile(syPx);
   let gx = toTile(gxPx);
@@ -104,7 +112,7 @@ export function findPath(
   gx = goal.x;
   gy = goal.y;
 
-  if (sx === gx && sy === gy) return [{ x: gxPx, y: gyPx }];
+  if (sx === gx && sy === gy) return { path: [{ x: gxPx, y: gyPx }], partial: false };
 
   const startIdx = sy * MAP_TILES + sx;
   const goalIdx = gy * MAP_TILES + gx;
@@ -116,16 +124,29 @@ export function findPath(
   open.push(startIdx, octile(sx, sy, gx, gy));
   const closed = new Set<number>();
 
+  // Closest-to-goal tile settled so far. If the goal turns out unreachable or
+  // we blow the expansion budget, we hand back a path to this tile (a "best
+  // effort" partial) instead of failing — which previously triggered a
+  // straight-line-through-walls fallback in the caller.
+  let bestIdx = startIdx;
+  let bestH = octile(sx, sy, gx, gy);
+
   let expansions = 0;
   while (open.size > 0) {
     const cur = open.pop();
-    if (cur === goalIdx) return reconstruct(cameFrom, cur);
+    if (cur === goalIdx) return { path: reconstruct(cameFrom, cur, true), partial: false };
     if (closed.has(cur)) continue;
     closed.add(cur);
-    if (++expansions > MAX_EXPANSIONS) return null;
 
     const cx = cur % MAP_TILES;
     const cy = (cur - cx) / MAP_TILES;
+    const h = octile(cx, cy, gx, gy);
+    if (h < bestH) {
+      bestH = h;
+      bestIdx = cur;
+    }
+    if (++expansions > MAX_EXPANSIONS) break;
+
     const cg = gScore.get(cur)!;
 
     for (let dy = -1; dy <= 1; dy++) {
@@ -150,9 +171,14 @@ export function findPath(
       }
     }
   }
-  return null;
 
-  function reconstruct(from: Map<number, number>, end: number): Vec2[] {
+  // Goal not reached. Return a partial path toward the closest tile we settled,
+  // so the unit walks as far as it can on walkable ground (never through walls).
+  // If we never got anywhere, the unit is boxed in — report failure.
+  if (bestIdx === startIdx) return null;
+  return { path: reconstruct(cameFrom, bestIdx, false), partial: true };
+
+  function reconstruct(from: Map<number, number>, end: number, reachedGoal: boolean): Vec2[] {
     const tiles: number[] = [end];
     let c = end;
     while (from.has(c)) {
@@ -167,9 +193,10 @@ export function findPath(
       const ty = (tiles[i] - tx) / MAP_TILES;
       pts.push({ x: tileCenter(tx), y: tileCenter(ty) });
     }
-    // Use the exact clicked point as the final waypoint when the goal tile was
-    // free (smoother off-grid arrival).
-    if (!world.isBlockedTile(toTile(gxPx), toTile(gyPx))) {
+    // Use the exact clicked point as the final waypoint when we actually reached
+    // the goal and its tile was free (smoother off-grid arrival). Partial paths
+    // end on a tile centre, not the unreachable click point.
+    if (reachedGoal && !world.isBlockedTile(toTile(gxPx), toTile(gyPx))) {
       pts[pts.length - 1] = { x: gxPx, y: gyPx };
     }
     return simplify(pts);
@@ -204,14 +231,21 @@ export function pathfindingSystem(world: World): void {
     const tf = world.transform.get(id);
     if (!tf) continue;
     budget--;
-    const path = findPath(world, tf.x, tf.y, mv.target.x, mv.target.y);
-    if (path && path.length > 0) {
-      mv.path = path;
+    const result = findPath(world, tf.x, tf.y, mv.target.x, mv.target.y);
+    if (result && result.path.length > 0) {
+      mv.path = result.path;
       mv.pathIndex = 0;
+      mv.partial = result.partial;
+      // A partial path stops short; re-plan from the new vantage point soon
+      // after arriving (small cooldown so we don't recompute the same leg every
+      // tick while walking it).
+      if (result.partial) mv.repathCooldown = 0.5;
     } else {
-      // Unreachable — straight-line fallback, then give up if still stuck.
-      mv.path = [{ x: mv.target.x, y: mv.target.y }];
-      mv.pathIndex = 0;
+      // Boxed in: no reachable tile makes progress toward the goal. Stand still
+      // (never straight-line through walls) and retry after a short delay.
+      mv.path = [];
+      mv.pathIndex = -1;
+      mv.partial = false;
       mv.repathCooldown = 1;
     }
   }

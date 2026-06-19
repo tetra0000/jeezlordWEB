@@ -26,7 +26,8 @@ import {
   handleRegister,
   handleResume,
 } from './session.js';
-import { clearMove, setMoveTarget } from '../sim/systems/movement.js';
+import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/movement.js';
+import { killEntity } from '../sim/systems/combat.js';
 import { spawnBuilding } from '../sim/spawn.js';
 import type { World } from '../sim/world.js';
 
@@ -107,7 +108,8 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
           cs.targetId = null;
           cs.commanded = false;
         }
-        setMoveTarget(world, id, tx, ty);
+        if (msg.queue) queueMoveTarget(world, id, tx, ty);
+        else setMoveTarget(world, id, tx, ty);
       }
       return;
     }
@@ -283,6 +285,18 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
           cs.targetId = null;
           cs.commanded = false;
         }
+      }
+      return;
+    }
+
+    case 'delete': {
+      // Destroy your own units. No refund. Only units (not buildings) and only
+      // entities you own — re-validated here; never trust the client.
+      for (const id of msg.unitIds) {
+        if (world.owner.get(id) !== playerId) continue;
+        const k = world.kind.get(id);
+        if (!k || !isUnit(k)) continue;
+        killEntity(world, id);
       }
       return;
     }

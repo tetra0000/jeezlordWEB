@@ -20,7 +20,12 @@ export class Net {
 
   private url(): string {
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${scheme}://${location.host}/ws`;
+    // Derive the WS path from the page's directory so the same build works at
+    // the domain root ("/") or under a subpath ("/jeezlord/"). Strips any
+    // trailing filename ("/jeezlord/index.html" -> "/jeezlord") then appends
+    // "/ws": root -> "/ws", subpath -> "/jeezlord/ws".
+    const base = location.pathname.replace(/\/[^/]*$/, '');
+    return `${scheme}://${location.host}${base}/ws`;
   }
 
   connect(): void {

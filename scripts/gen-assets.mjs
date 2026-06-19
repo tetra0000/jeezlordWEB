@@ -117,6 +117,23 @@ function cavalry() {
   im.outline();
   im.save('cavalry');
 }
+function scout() {
+  // A light, lean mount with a slim rider carrying a pennant — reads as a fast
+  // recon rider rather than a heavy cavalryman.
+  const im = new Img(32, 32);
+  im.ellipse(15, 20, 10, 4, L); // slimmer mount body
+  im.rect(8, 23, 2, 6, M); // legs (thin)
+  im.rect(13, 23, 2, 6, M);
+  im.rect(21, 23, 2, 6, M);
+  im.ellipse(24, 16, 3, 2, L); // head
+  im.line(27, 16, 30, 18, M, 0); // muzzle
+  im.rect(13, 8, 4, 8, L); // slim rider
+  im.circle(15, 7, 3, L);
+  im.line(19, 4, 19, 14, M, 0); // pennant pole
+  im.rect(19, 4, 5, 3, W); // pennant flag
+  im.outline();
+  im.save('scout');
+}
 function horse() {
   const im = new Img(32, 32);
   im.ellipse(16, 20, 13, 7, L); // big mount
@@ -266,6 +283,22 @@ function water() {
   }
   im.save('tile_water');
 }
+function mountain() {
+  const im = new Img(32, 32);
+  let seed = 4242;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [86, 84, 88]); // rocky grey base
+  for (let i = 0; i < 60; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [98, 96, 100] : [72, 70, 74]);
+  // A couple of triangular peaks with snow caps.
+  for (const [px, ph] of [[10, 22], [22, 26]]) {
+    for (let i = 0; i < ph; i++) {
+      const w = Math.round((i / ph) * 9);
+      im.rect(px - w, 30 - i, 2 * w + 1, 1, [120, 118, 122]);
+    }
+    im.rect(px - 2, 30 - ph, 4, 3, [232, 234, 240]); // snow cap
+  }
+  im.save('tile_mountain');
+}
 function bridge() {
   const im = new Img(32, 32);
   im.rect(0, 0, 32, 32, [120, 82, 44]); // plank wood
@@ -286,6 +319,7 @@ function fx(name, draw) {
 villager();
 infantry();
 archer();
+scout();
 cavalry();
 horse();
 catapult();
@@ -332,6 +366,7 @@ berry();
 grass();
 water();
 bridge();
+mountain();
 
 fx('chop', (im) => { for (const [x, y] of [[6, 6], [9, 5], [7, 9], [10, 9]]) im.rect(x, y, 2, 2, [150, 100, 50]); });
 fx('spark', (im) => { im.line(3, 8, 13, 8, [255, 224, 90], 0); im.line(8, 3, 8, 13, [255, 224, 90], 0); im.circle(8, 8, 2, [255, 245, 180]); });

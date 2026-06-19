@@ -5,7 +5,7 @@ import { Assets, Texture } from 'pixi.js';
 import type { EntityKind } from '../../../shared/types.js';
 
 const ENTITY_KINDS: EntityKind[] = [
-  'villager', 'infantry', 'archer', 'cavalry', 'horse', 'catapult',
+  'villager', 'infantry', 'archer', 'scout', 'cavalry', 'horse', 'catapult',
   'townCenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'barracks', 'range', 'stable', 'tower', 'wall', 'farm',
   'tree', 'gold', 'stone', 'berry',
 ];
@@ -18,6 +18,8 @@ export async function loadAssets(): Promise<void> {
     tile_grass: 'assets/tile_grass.png',
     tile_water: 'assets/tile_water.png',
     tile_bridge: 'assets/tile_bridge.png',
+    tile_mountain: 'assets/tile_mountain.png',
+    tile_forestground: 'assets/tile_forestground.png',
   };
   for (const k of ENTITY_KINDS) manifest[k] = `assets/${k}.png`;
   for (const f of FX) manifest['fx_' + f] = `assets/fx_${f}.png`;

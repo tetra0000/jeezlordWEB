@@ -12,6 +12,7 @@ import {
   UNIT_STATS,
   costOf,
   isBuilding,
+  isUnit,
 } from '../../../shared/stats.js';
 import type { Cost } from '../../../shared/stats.js';
 import type { VillagerJob } from '../../../shared/types.js';
@@ -36,8 +37,32 @@ const LABEL: Record<string, string> = {
   townCenter: 'Town Center', house: 'House', mill: 'Mill', lumbercamp: 'Lumber Camp',
   miningcamp: 'Mining Camp', farm: 'Farm', barracks: 'Barracks', range: 'Archery', stable: 'Stable',
   tower: 'Tower', wall: 'Wall', villager: 'Villager', infantry: 'Infantry', archer: 'Archer',
-  cavalry: 'Cavalry', horse: 'Knight', catapult: 'Catapult',
+  scout: 'Scout', cavalry: 'Cavalry', horse: 'Knight', catapult: 'Catapult',
   tree: 'Tree', gold: 'Gold Mine', stone: 'Stone', berry: 'Berry Bush',
+};
+// One-line "what does this do" blurbs shown as hover tooltips on the build/train
+// buttons (cost is already on the button face).
+const DESC: Record<string, string> = {
+  // buildings
+  townCenter: 'Your base: trains Villagers, accepts every resource, gives population, vision and territory.',
+  house: 'Raises your population cap so you can support more units.',
+  mill: 'Food drop-off and forage camp: adds Forager capacity and a gather area; farms/berries deposit here.',
+  lumbercamp: 'Wood drop-off: place by trees to add Lumberjack capacity and a new gather area.',
+  miningcamp: 'Gold & stone drop-off: place by mines to add Miner capacity and a new gather area.',
+  farm: 'Grows food; one Farmer works it. Auto-reseeds with wood when empty (toggle in its panel).',
+  barracks: 'Trains Infantry and Catapults.',
+  range: 'Trains Archers.',
+  stable: 'Trains Scouts, Cavalry and Knights.',
+  tower: 'Defensive tower: fires at nearby enemies and has long vision. Build on your frontier.',
+  wall: 'Cheap, tough barrier that blocks enemy movement.',
+  // units
+  villager: 'Gathers resources and builds/repairs. Assign jobs in the Villagers panel (bottom-left).',
+  scout: 'Fast cavalry with long vision but weak attack — for exploring and spotting enemies.',
+  infantry: 'Sturdy melee soldier; solid all-rounder.',
+  archer: 'Ranged attacker: good damage from afar, fragile in melee.',
+  cavalry: 'Fast, hard-hitting mounted melee unit.',
+  horse: 'Knight: heavily armoured mounted unit with high HP and damage.',
+  catapult: 'Slow siege engine: huge damage, devastating against buildings.',
 };
 const RES_TYPE: Record<string, string> = { tree: 'wood', gold: 'gold', stone: 'stone', berry: 'food' };
 const ACTION_LABEL: Record<string, string> = {
@@ -98,6 +123,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Shift') this.shift = true;
       if (e.key === 'Escape') this.cancelPlacement();
+      if (e.key === 'Delete') this.deleteSelected();
     });
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Shift') this.shift = false;
@@ -192,6 +218,25 @@ export class Input {
     return out;
   }
 
+  // Own units (any kind, incl. villagers) in the current selection — the set the
+  // Delete command acts on (buildings are not deletable).
+  private selectedOwnUnits(): number[] {
+    const out: number[] = [];
+    for (const id of this.state.selection) {
+      const e = this.state.entities.get(id);
+      if (e && e.view.owner === this.state.playerId && isUnit(e.view.kind)) out.push(id);
+    }
+    return out;
+  }
+
+  // Destroy the selected own units (no resource refund). Server re-validates.
+  private deleteSelected(): void {
+    const ids = this.selectedOwnUnits();
+    if (ids.length === 0) return;
+    this.net.send({ t: 'delete', unitIds: ids });
+    this.showToast(`deleted ${ids.length} unit${ids.length === 1 ? '' : 's'}`);
+  }
+
   // Own production buildings (those with a train list) in the selection.
   private selectedTrainers(): number[] {
     const out: number[] = [];
@@ -230,9 +275,11 @@ export class Input {
       sound.play('attackCmd', { pan });
       this.r.entities.ping(target.view.x, target.view.y, 0xff5a5a);
     } else {
-      this.net.send({ t: 'move', unitIds: ids, x: p.x, y: p.y });
+      // Shift queues the click as a waypoint after the current order; a plain
+      // click replaces it.
+      this.net.send({ t: 'move', unitIds: ids, x: p.x, y: p.y, queue: this.shift });
       sound.play('move', { pan });
-      this.r.entities.ping(p.x, p.y, 0x8ad06a);
+      this.r.entities.ping(p.x, p.y, this.shift ? 0xffd24a : 0x8ad06a);
     }
   }
 
@@ -316,7 +363,7 @@ export class Input {
   // Rebuild the panel when the selection's relevant signature changes.
   update(): void {
     const trainer = this.trainerBuilding();
-    const key = `${trainer ?? ''}|${this.pendingBuild ?? ''}`;
+    const key = `${trainer ?? ''}|${this.pendingBuild ?? ''}|d${this.selectedOwnUnits().length}`;
     if (key !== this.panelKey) this.refreshPanel(false);
     this.updateInfoPanel();
     this.updateAdminPanel();
@@ -545,24 +592,36 @@ export class Input {
 
   private refreshPanel(force: boolean): void {
     const trainer = this.trainerBuilding();
-    this.panelKey = `${trainer ?? ''}|${this.pendingBuild ?? ''}`;
+    const delUnits = this.selectedOwnUnits();
+    this.panelKey = `${trainer ?? ''}|${this.pendingBuild ?? ''}|d${delUnits.length}`;
     this.panel.innerHTML = '';
 
     if (trainer != null) {
       const kind = this.state.entities.get(trainer)!.view.kind;
       for (const unit of BUILDING_STATS[kind].trains ?? []) {
-        this.panel.appendChild(this.makeButton(LABEL[unit] ?? unit, costOf(unit), () =>
+        const btn = this.makeButton(LABEL[unit] ?? unit, costOf(unit), () =>
           this.net.send({ t: 'train', buildingId: trainer, unit }),
-        ));
+        );
+        btn.title = DESC[unit] ?? '';
+        this.panel.appendChild(btn);
       }
     } else {
       // No production building selected: the build palette is always available
       // (construction is carried out by the kingdom's builder villagers).
       for (const kind of BUILDABLE) {
         const btn = this.makeButton(LABEL[kind] ?? kind, BUILDING_STATS[kind].cost, () => this.startPlacement(kind));
+        btn.title = DESC[kind] ?? '';
         if (kind === this.pendingBuild) btn.classList.add('placing');
         this.panel.appendChild(btn);
       }
+    }
+
+    // Delete button for any selected own units (destroys them; no refund).
+    if (delUnits.length > 0) {
+      const btn = this.makeButton(`✖ Delete (${delUnits.length})`, {}, () => this.deleteSelected());
+      btn.classList.add('danger');
+      btn.title = 'Destroy the selected units. No resources are refunded.';
+      this.panel.appendChild(btn);
     }
     void force;
   }

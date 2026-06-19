@@ -1,0 +1,32 @@
+# systemd unit for the always-on Jeezlord server on a cPanel/WHM VPS.
+# Runs the game as the cPanel account user, from its home directory.
+#
+# The word CPUSER below is a placeholder — the install step in DEPLOY.md does
+#   sed -i "s/CPUSER/your-real-username/g"
+# to fill it in, so you don't have to edit this by hand.
+#
+# A "systemd service" just means: the OS keeps this process running 24/7 and
+# restarts it automatically if it crashes or the server reboots.
+
+[Unit]
+Description=Jeezlord RTS game server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/CPUSER/jeezlord
+ExecStart=/usr/bin/node dist/server/main.js
+Restart=always
+RestartSec=2
+Environment=NODE_ENV=production
+# Apache reverse-proxies to this local port; it is NOT exposed to the internet.
+Environment=PORT=8081
+Environment=DB_PATH=/home/CPUSER/jeezlord/data/world.db
+# Graceful shutdown: SIGTERM triggers a final SQLite flush; allow time for it.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+User=CPUSER
+Group=CPUSER
+
+[Install]
+WantedBy=multi-user.target

@@ -31,6 +31,7 @@ export const KIND_STYLE: Record<EntityKind, KindStyle> = {
   villager: { shape: 'circle', glyph: 'V', size: 10 },
   infantry: { shape: 'circle', glyph: 'I', size: 11 },
   archer: { shape: 'circle', glyph: 'A', size: 10 },
+  scout: { shape: 'circle', glyph: 'S', size: 11 },
   cavalry: { shape: 'circle', glyph: 'C', size: 12 },
   horse: { shape: 'circle', glyph: 'H', size: 13 },
   catapult: { shape: 'circle', glyph: 'K', size: 14 },

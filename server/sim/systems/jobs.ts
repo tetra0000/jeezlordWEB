@@ -164,6 +164,27 @@ function nearestFoundation(world: World, pid: PlayerId, ctx: PlayerCtx, vid: Ent
   return best;
 }
 
+// Nearest owned, completed building/wall below max HP inside our territory — a
+// repair target for an idle builder.
+function nearestRepair(world: World, pid: PlayerId, ctx: PlayerCtx, vid: EntityId): EntityId | null {
+  const vtf = world.transform.get(vid);
+  if (!vtf) return null;
+  let best: EntityId | null = null;
+  let bestD = Infinity;
+  for (const [id, owner] of world.owner) {
+    if (owner !== pid) continue;
+    const k = world.kind.get(id);
+    if (!k || !isBuilding(k) || !world.isOperational(id)) continue;
+    const h = world.health.get(id);
+    if (!h || h.hp >= h.maxHp) continue;
+    const tf = world.transform.get(id)!;
+    if (!within(ctx.tc, tf.x, tf.y)) continue;
+    const d = Math.hypot(tf.x - vtf.x, tf.y - vtf.y);
+    if (d < bestD) { bestD = d; best = id; }
+  }
+  return best;
+}
+
 // Nearest neutral resource node of the job's kind within a host building radius.
 function nearestNode(world: World, ctx: PlayerCtx, job: VillagerJob, vid: EntityId): EntityId | null {
   const kind = JOB_NODE_KIND[job];
@@ -188,6 +209,18 @@ function isFoundation(world: World, pid: PlayerId, id: EntityId | null | undefin
   if (id == null || !world.has(id)) return false;
   const k = world.kind.get(id);
   return world.owner.get(id) === pid && !!k && isBuilding(k) && !world.isOperational(id);
+}
+
+// A completed, owned building/wall below max HP inside our territory (repairable).
+function isRepairTarget(world: World, pid: PlayerId, ctx: PlayerCtx, id: EntityId | null | undefined): boolean {
+  if (id == null || !world.has(id)) return false;
+  if (world.owner.get(id) !== pid) return false;
+  const k = world.kind.get(id);
+  if (!k || !isBuilding(k) || !world.isOperational(id)) return false;
+  const h = world.health.get(id);
+  if (!h || h.hp >= h.maxHp) return false;
+  const tf = world.transform.get(id)!;
+  return within(ctx.tc, tf.x, tf.y);
 }
 
 // Bind farmers 1:1 to operational farms. (Capacity already ensures #farmers <=
@@ -222,8 +255,14 @@ function assignFarmers(world: World, pid: PlayerId, vills: Villager[], dt: numbe
 
 function assignWork(world: World, pid: PlayerId, ctx: PlayerCtx, id: EntityId, g: Gatherer, dt: number): void {
   if (g.job === 'builder') {
-    if (g.state === 'building' && isFoundation(world, pid, g.buildTargetId)) { g.idleTime = 0; return; }
-    const target = nearestFoundation(world, pid, ctx, id);
+    // Keep the current task if it's still a valid foundation or repair target.
+    if (g.state === 'building' &&
+        (isFoundation(world, pid, g.buildTargetId) || isRepairTarget(world, pid, ctx, g.buildTargetId))) {
+      g.idleTime = 0;
+      return;
+    }
+    // Prefer finishing foundations; otherwise repair the nearest damaged building.
+    const target = nearestFoundation(world, pid, ctx, id) ?? nearestRepair(world, pid, ctx, id);
     if (target == null) { goIdle(world, id, g); g.idleTime += dt; return; }
     g.state = 'building';
     g.buildTargetId = target;

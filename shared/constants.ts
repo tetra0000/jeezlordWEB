@@ -11,6 +11,9 @@ export const MAP_PX = MAP_TILES * TILE; // 16384 px
 export const TERRAIN_GRASS = 0;
 export const TERRAIN_WATER = 1;
 export const TERRAIN_BRIDGE = 2;
+// Mountains are static, impassable terrain (like water) — generated as ranges
+// with deliberate walkable passes carved through. Rendered as a rocky tile.
+export const TERRAIN_MOUNTAIN = 3;
 
 export const TICK_HZ = 10; // authoritative simulation rate
 export const TICK_MS = 1000 / TICK_HZ;
