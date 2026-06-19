@@ -105,6 +105,9 @@ export class Input {
   private readonly toastEl = document.getElementById('toast')!;
   private readonly tooltipEl = document.getElementById('tooltip')!;
   private readonly coordsEl = document.getElementById('coords')!;
+  private readonly renameModal = document.getElementById('rename-modal')!;
+  private readonly renameInput = document.getElementById('rename-input') as HTMLInputElement;
+  private renameId: number | null = null;
   private panelKey = '';
   private infoKey = '';
   private adminKey = '';
@@ -127,6 +130,19 @@ export class Input {
     });
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Shift') this.shift = false;
+    });
+
+    // Rename dialog wiring. The input swallows keydowns (stopPropagation) so the
+    // game's WASD/Delete/Esc shortcuts don't fire while typing.
+    document.getElementById('rename-save')!.addEventListener('click', () => this.commitRename());
+    document.getElementById('rename-cancel')!.addEventListener('click', () => this.closeRename());
+    this.renameInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); this.commitRename(); }
+      else if (e.key === 'Escape') { e.preventDefault(); this.closeRename(); }
+    });
+    this.renameModal.addEventListener('pointerdown', (e) => {
+      if (e.target === this.renameModal) this.closeRename(); // click backdrop to dismiss
     });
 
     canvas.addEventListener('pointerdown', (e) => {
@@ -333,6 +349,16 @@ export class Input {
       .rect(tileX * TILE, tileY * TILE, f * TILE, f * TILE)
       .fill({ color: ok ? 0x6ad06a : 0xd06a6a, alpha: 0.35 })
       .stroke({ width: 2, color: ok ? 0x9af09a : 0xf09a9a });
+    // Defensive buildings (towers) preview their attack radius so the player can
+    // see the coverage before committing the placement.
+    const stat = BUILDING_STATS[this.pendingBuild];
+    if (stat.attack != null && stat.range) {
+      const cx2 = (tileX + f / 2) * TILE;
+      const cy2 = (tileY + f / 2) * TILE;
+      this.ghost.circle(cx2, cy2, stat.range)
+        .fill({ color: 0xff6a4a, alpha: 0.05 })
+        .stroke({ width: 1.5, color: 0xff8a5a, alpha: 0.5 });
+    }
     this.ghost.visible = true;
   }
 
@@ -491,20 +517,36 @@ export class Input {
   // (re-run whenever the panel HTML is rebuilt).
   private wireInfoButtons(id: number): void {
     const rename = this.infoEl.querySelector('#ip-rename');
-    if (rename) {
-      rename.addEventListener('click', () => {
-        const cur = this.state.entities.get(id)?.view.name ?? '';
-        const name = window.prompt('Name this town center:', cur);
-        if (name !== null) this.net.send({ t: 'rename', buildingId: id, name: name.trim() });
-      });
-    }
-    const toggle = this.infoEl.querySelector('#ip-farm-toggle');
+    if (rename) rename.addEventListener('click', () => this.openRename(id));
+    const toggle = this.infoEl.querySelector('#ip-farm-toggle') as HTMLElement | null;
     if (toggle) {
+      this.setTip(toggle, 'Auto-reseed',
+        'When the farm runs out, automatically spend wood to replant it. Turn off to stop spending wood.');
       toggle.addEventListener('click', () => {
         const cur = this.state.entities.get(id)?.view.farmAuto ?? true;
         this.net.send({ t: 'farmReseed', buildingId: id, on: !cur });
       });
     }
+  }
+
+  // --- in-game rename dialog ------------------------------------------------
+  private openRename(id: number): void {
+    this.renameId = id;
+    this.renameInput.value = this.state.entities.get(id)?.view.name ?? '';
+    this.renameModal.classList.remove('hidden');
+    this.renameInput.focus();
+    this.renameInput.select();
+  }
+
+  private commitRename(): void {
+    if (this.renameId == null) return;
+    this.net.send({ t: 'rename', buildingId: this.renameId, name: this.renameInput.value.trim() });
+    this.closeRename();
+  }
+
+  private closeRename(): void {
+    this.renameId = null;
+    this.renameModal.classList.add('hidden');
   }
 
   private hpBar(hp: number, maxHp: number): string {
@@ -551,8 +593,7 @@ export class Input {
       if (owned) {
         const on = v.farmAuto ?? true;
         parts.push(
-          `<button id="ip-farm-toggle" class="ip-btn${on ? ' on' : ''}"` +
-          ` title="When the farm runs out, automatically spend wood to replant it. Turn off to stop spending wood.">` +
+          `<button id="ip-farm-toggle" class="ip-btn${on ? ' on' : ''}">` +
           `Auto-reseed: ${on ? 'ON' : 'OFF'}</button>`,
         );
       }
@@ -602,7 +643,7 @@ export class Input {
         const btn = this.makeButton(LABEL[unit] ?? unit, costOf(unit), () =>
           this.net.send({ t: 'train', buildingId: trainer, unit }),
         );
-        btn.title = DESC[unit] ?? '';
+        if (DESC[unit]) this.setTip(btn, LABEL[unit] ?? unit, DESC[unit]);
         this.panel.appendChild(btn);
       }
     } else {
@@ -610,7 +651,7 @@ export class Input {
       // (construction is carried out by the kingdom's builder villagers).
       for (const kind of BUILDABLE) {
         const btn = this.makeButton(LABEL[kind] ?? kind, BUILDING_STATS[kind].cost, () => this.startPlacement(kind));
-        btn.title = DESC[kind] ?? '';
+        if (DESC[kind]) this.setTip(btn, LABEL[kind] ?? kind, DESC[kind]);
         if (kind === this.pendingBuild) btn.classList.add('placing');
         this.panel.appendChild(btn);
       }
@@ -620,7 +661,7 @@ export class Input {
     if (delUnits.length > 0) {
       const btn = this.makeButton(`✖ Delete (${delUnits.length})`, {}, () => this.deleteSelected());
       btn.classList.add('danger');
-      btn.title = 'Destroy the selected units. No resources are refunded.';
+      this.setTip(btn, 'Delete', 'Destroy the selected units. No resources are refunded.');
       this.panel.appendChild(btn);
     }
     void force;
@@ -649,9 +690,43 @@ export class Input {
     }
   }
 
+  // --- in-game tooltips (DOM panel, not native title=) ----------------------
+  // Show a tooltip with a bold title + grey body, positioned to stay on-screen.
+  private showTip(title: string, body: string, cx: number, cy: number): void {
+    this.tooltipEl.innerHTML = `<span class="ttl">${escapeHtml(title)}</span>`
+      + (body ? `<br><span class="sub">${escapeHtml(body)}</span>` : '');
+    this.tooltipEl.classList.remove('hidden');
+    this.positionTip(cx, cy);
+  }
+
+  private hideTip(): void {
+    this.tooltipEl.classList.add('hidden');
+  }
+
+  // Place the (already-shown, so measurable) tooltip near the cursor, flipping
+  // left/up when it would overflow the viewport — important for the bottom
+  // command bar where a below-cursor tooltip would fall off-screen.
+  private positionTip(cx: number, cy: number): void {
+    const t = this.tooltipEl;
+    const w = t.offsetWidth, h = t.offsetHeight;
+    let x = cx + 14;
+    let y = cy + 16;
+    if (x + w > window.innerWidth - 8) x = cx - w - 14;
+    if (y + h > window.innerHeight - 8) y = cy - h - 16;
+    t.style.left = `${Math.max(8, x)}px`;
+    t.style.top = `${Math.max(8, y)}px`;
+  }
+
+  // Attach a hover tooltip to a DOM element (replaces native `title=`).
+  private setTip(el: HTMLElement, title: string, body: string): void {
+    el.addEventListener('mouseenter', (e) => this.showTip(title, body, e.clientX, e.clientY));
+    el.addEventListener('mousemove', (e) => this.positionTip(e.clientX, e.clientY));
+    el.addEventListener('mouseleave', () => this.hideTip());
+  }
+
   // Hover tooltip describing whatever is under the cursor.
   private updateTooltip(cx: number, cy: number): void {
-    if (this.pendingBuild || this.dragging) {
+    if (this.pendingBuild || this.dragging || !this.renameModal.classList.contains('hidden')) {
       this.tooltipEl.classList.add('hidden');
       return;
     }
@@ -677,9 +752,8 @@ export class Input {
       sub = lines.join(' · ');
     }
     this.tooltipEl.innerHTML = `<span class="ttl">${name}</span><br><span class="sub">${sub}</span>`;
-    this.tooltipEl.style.left = `${cx + 14}px`;
-    this.tooltipEl.style.top = `${cy + 16}px`;
     this.tooltipEl.classList.remove('hidden');
+    this.positionTip(cx, cy);
   }
 
   showToast(msg: string): void {

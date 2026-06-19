@@ -109,6 +109,7 @@ export class EntityLayer {
   readonly container = new Container();
   private readonly fxLayer = new Container();
   private readonly rallyG = new Graphics(); // rally flags for selected buildings
+  private readonly rangeG = new Graphics(); // attack radius of selected towers
   private readonly pathG = new Graphics(); // planned move paths for selected units
   private readonly sprites = new Map<EntityId, Sprite_>();
   private readonly effects: Effect[] = [];
@@ -123,9 +124,11 @@ export class EntityLayer {
     this.container.sortableChildren = true;
     this.fxLayer.zIndex = Z_GROUND;
     this.rallyG.zIndex = Z_GROUND;
+    this.rangeG.zIndex = Z_GROUND;
     this.pathG.zIndex = Z_PATH;
     this.container.addChild(this.fxLayer);
     this.container.addChild(this.rallyG);
+    this.container.addChild(this.rangeG);
     this.container.addChild(this.pathG);
   }
 
@@ -161,6 +164,22 @@ export class EntityLayer {
       g.stroke({ width: 2, color: 0x8ad06a, alpha: 0.55 });
       const dest = path[path.length - 1];
       g.circle(dest.x, dest.y, 4).stroke({ width: 2, color: 0x8ad06a, alpha: 0.8 });
+    }
+  }
+
+  // Draw the attack radius of every selected own tower (any building that fires)
+  // so the player can see its coverage.
+  private drawRanges(state: ClientState): void {
+    const g = this.rangeG;
+    g.clear();
+    for (const id of state.selection) {
+      const e = state.entities.get(id);
+      if (!e || !isBuilding(e.view.kind)) continue;
+      const stat = BUILDING_STATS[e.view.kind];
+      if (stat.attack == null || !stat.range) continue;
+      g.circle(e.rx, e.ry, stat.range)
+        .fill({ color: 0xff6a4a, alpha: 0.06 })
+        .stroke({ width: 1.5, color: 0xff8a5a, alpha: 0.5 });
     }
   }
 
@@ -457,6 +476,7 @@ export class EntityLayer {
     }
 
     this.drawRallyFlags(state);
+    this.drawRanges(state);
     this.drawPaths(state);
 
     // Advance + cull effect particles.

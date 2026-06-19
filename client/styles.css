@@ -507,6 +507,68 @@ button:active {
   color: #9ab;
 }
 
+/* In-game modal dialog (e.g. rename), replacing native prompt(). */
+#rename-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0009;
+  z-index: 12;
+  pointer-events: auto;
+}
+#rename-modal .modal {
+  background: #161b16f2;
+  border: 1px solid #4a5a4a;
+  border-radius: 10px;
+  padding: 18px 20px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 10px 34px #000a;
+}
+#rename-modal .modal-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #ffe08a;
+}
+#rename-modal input {
+  padding: 9px 11px;
+  border-radius: 6px;
+  border: 1px solid #4a5a4a;
+  background: #0e120e;
+  color: #eee;
+  font-size: 14px;
+}
+#rename-modal input:focus {
+  outline: none;
+  border-color: #8ad06a;
+}
+#rename-modal .modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+#rename-modal .modal-buttons button {
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid #4a5a4a;
+  background: #1c241c;
+  color: #dfe;
+  font-size: 13px;
+  cursor: pointer;
+}
+#rename-modal #rename-save {
+  background: #4a6a3a;
+  border-color: #8ad06a;
+  color: #fff;
+}
+#rename-modal .modal-buttons button:hover {
+  filter: brightness(1.15);
+}
+
 #toast {
   position: absolute;
   top: 60px;
