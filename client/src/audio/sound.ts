@@ -36,7 +36,7 @@ type Voice = ToneVoice | NoiseVoice;
 export type SoundName =
   | 'click' | 'select' | 'move' | 'attackCmd' | 'gatherCmd' | 'rally'
   | 'place' | 'error' | 'complete'
-  | 'chop' | 'mine' | 'forage' | 'hammer' | 'hit' | 'death';
+  | 'chop' | 'mine' | 'forage' | 'hammer' | 'hit' | 'death' | 'bow';
 
 interface Recipe {
   voices: Voice[];
@@ -107,6 +107,11 @@ const BANK: Record<SoundName, Recipe> = {
   death: { throttle: 70, voices: [
     { kind: 'tone', wave: 'sawtooth', freq: 320, freqEnd: 60, dur: 0.34, gain: 0.22 },
     { kind: 'noise', filter: 'lowpass', freq: 500, dur: 0.28, gain: 0.18 },
+  ] },
+  // Bowstring release: a quick airy thwip (the arrow loosing).
+  bow: { throttle: 45, voices: [
+    { kind: 'noise', filter: 'highpass', freq: 2400, dur: 0.07, gain: 0.13 },
+    { kind: 'tone', wave: 'triangle', freq: 760, freqEnd: 280, dur: 0.09, gain: 0.08 },
   ] },
 };
 

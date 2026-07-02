@@ -1,7 +1,7 @@
 // The authoritative world: entity/component store, tile-occupancy grid, and
 // player registry. Sim systems mutate this; persistence flushes it; snapshots
 // read from it. In-RAM is the source of truth at runtime.
-import type { Action, EntityId, EntityKind, EntityView, PlayerId } from '../../shared/types.js';
+import type { Action, EntityId, EntityKind, EntityView, PlayerId, ProjectileKind } from '../../shared/types.js';
 import { MAP_TILES, TILE, TERRAIN_WATER, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
 import {
   BASE_POP_CAP,
@@ -20,6 +20,19 @@ import type {
   PlayerState,
   TrainItem,
 } from './components.js';
+
+// A ranged shot fired this tick. The attacker/target ids let the snapshot
+// fog-filter it (only send a shot whose shooter or victim the player can see);
+// only the positions + kind go on the wire (see shared/types.ts Shot).
+export interface ShotEvent {
+  kind: ProjectileKind;
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  from: EntityId;
+  to: EntityId;
+}
 
 export class World {
   readonly kind = new Map<EntityId, EntityKind>();
@@ -41,6 +54,11 @@ export class World {
   readonly resourceAmount = new Map<EntityId, number>();
   // Dead units' bodies (kind === 'corpse'): decorative, neutral, decaying.
   readonly corpses = new Map<EntityId, Corpse>();
+
+  // Ranged projectiles loosed this tick (cosmetic). Filled by the combat system,
+  // drained into each player's delta by the snapshot, then cleared at the start
+  // of the next combat tick. Transient — never persisted.
+  readonly shots: ShotEvent[] = [];
 
   readonly players = new Map<PlayerId, PlayerState>();
 
@@ -141,6 +159,25 @@ export class World {
     for (let dy = 0; dy < footprint; dy++)
       for (let dx = 0; dx < footprint; dx++)
         if (!this.canBuildTile(tileX + dx, tileY + dy)) return false;
+    return true;
+  }
+  // True if the courtyard ring — a band `outline` tiles thick around the
+  // footprint — contains no movement blocker. The courtyard is reserved as
+  // walkable path (see spawn.applyBuildingFootprint), so it may not be placed
+  // over a wall, another building, a resource node, or impassable terrain. This
+  // is the forward half of "no building flush against a courtyard"; the reverse
+  // (placing a footprint INTO a courtyard) is enforced by footprintFree rejecting
+  // no-build tiles. Off-map ring tiles are ignored, matching how the ring's
+  // reservation is clamped to bounds on placement.
+  outlineClear(tileX: number, tileY: number, footprint: number, outline: number): boolean {
+    for (let dy = -outline; dy < footprint + outline; dy++)
+      for (let dx = -outline; dx < footprint + outline; dx++) {
+        if (dx >= 0 && dx < footprint && dy >= 0 && dy < footprint) continue; // footprint, checked elsewhere
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        if (!this.inBounds(tx, ty)) continue;
+        if (this.isBlockedTile(tx, ty)) return false;
+      }
     return true;
   }
 

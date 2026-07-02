@@ -6,7 +6,7 @@
 import { Container, Graphics, Point, Sprite, Text } from 'pixi.js';
 import { TILE } from '../../../shared/constants.js';
 import { BUILDING_STATS, TERRITORY_MAX_TILES, isBuilding, isResourceNode } from '../../../shared/stats.js';
-import type { Action, EntityId, EntityKind, PlayerId } from '../../../shared/types.js';
+import type { Action, EntityId, EntityKind, PlayerId, ProjectileKind } from '../../../shared/types.js';
 import type { ClientState } from '../state.js';
 import { ownerColor } from './colors.js';
 import { tex } from './assets.js';
@@ -47,6 +47,20 @@ interface Effect {
   vy: number;
 }
 
+// An in-flight ranged projectile (arrow/boulder) arcing from shooter to target.
+// Cosmetic only — the server already applied the damage when it fired.
+interface Projectile {
+  g: Graphics;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  life: number; // seconds left in flight
+  maxLife: number;
+  arc: number; // peak lift of the parabola, in world px
+  kind: ProjectileKind;
+}
+
 // Expanding ground ring (move/attack/gather marker, building-complete flash).
 interface Ping {
   g: Graphics;
@@ -77,6 +91,8 @@ const Z_RESOURCE = 1;
 const Z_BUILDING = 2;
 const Z_UNIT = 3;
 const Z_PATH = 4; // planned move path, drawn over units so it stays visible
+const Z_RALLY = 5; // rally flags, above the move paths so the flag stays readable
+const Z_PROJECTILE = 6; // arrows/boulders in flight, above everything
 
 function zIndexFor(kind: EntityKind): number {
   if (kind === 'corpse') return Z_RESOURCE; // on the ground, under the living
@@ -129,9 +145,11 @@ export class EntityLayer {
   private readonly gatherG = new Graphics(); // harvest radius of selected gather camps
   private readonly territoryG = new Graphics(); // max-growth border of selected town centers
   private readonly pathG = new Graphics(); // planned move paths for selected units
+  private readonly projLayer = new Container(); // arrows/boulders in flight
   private readonly sprites = new Map<EntityId, Sprite_>();
   private readonly effects: Effect[] = [];
   private readonly pings: Ping[] = [];
+  private readonly projectiles: Projectile[] = [];
   private readonly tmp = new Point();
   private t = 0;
 
@@ -141,17 +159,19 @@ export class EntityLayer {
     // was lazily created on entering the viewport.
     this.container.sortableChildren = true;
     this.fxLayer.zIndex = Z_GROUND;
-    this.rallyG.zIndex = Z_GROUND;
+    this.rallyG.zIndex = Z_RALLY;
     this.rangeG.zIndex = Z_GROUND;
     this.gatherG.zIndex = Z_GROUND;
     this.territoryG.zIndex = Z_GROUND;
     this.pathG.zIndex = Z_PATH;
+    this.projLayer.zIndex = Z_PROJECTILE;
     this.container.addChild(this.fxLayer);
     this.container.addChild(this.rallyG);
     this.container.addChild(this.rangeG);
     this.container.addChild(this.gatherG);
     this.container.addChild(this.territoryG);
     this.container.addChild(this.pathG);
+    this.container.addChild(this.projLayer);
   }
 
   // Draw a rally flag (+ a line from the building) for every selected own
@@ -341,7 +361,7 @@ export class EntityLayer {
     return this.sprites.size;
   }
   get fxCount(): number {
-    return this.effects.length + this.pings.length;
+    return this.effects.length + this.pings.length + this.projectiles.length;
   }
 
   private spawnEffect(
@@ -394,6 +414,19 @@ export class EntityLayer {
   deathFx(x: number, y: number): void {
     this.burst('fx_dust', x, y, 5, 30);
     this.spawnEffect('fx_slash', x, y, { vy: -6, life: 0.4, scale: 1.4 });
+  }
+
+  // Launch a visible ranged projectile arcing from (x0,y0) to (x1,y1). Flight
+  // time scales with distance (a fixed speed per kind); the parabolic arc gives
+  // it a thrown/lobbed feel. Drawn each frame in frame(); impact FX on landing.
+  spawnShot(x0: number, y0: number, x1: number, y1: number, kind: ProjectileKind): void {
+    const g = new Graphics();
+    this.projLayer.addChild(g);
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    const speed = kind === 'boulder' ? 320 : 680; // world px / s
+    const life = Math.max(0.1, dist / speed);
+    const arc = kind === 'boulder' ? Math.min(70, dist * 0.28) : Math.min(20, dist * 0.1);
+    this.projectiles.push({ g, x0, y0, x1, y1, life, maxLife: life, arc, kind });
   }
 
   // Construction finished: golden ring + rising sparks.
@@ -584,6 +617,44 @@ export class EntityLayer {
       if (fx.life <= 0) {
         fx.spr.destroy();
         this.effects.splice(i, 1);
+      }
+    }
+
+    // Advance + draw + cull in-flight projectiles. Position follows a parabola
+    // (straight base path minus a sine lift), and arrows orient along their
+    // instantaneous velocity. On landing we punch a small impact effect.
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      p.life -= dtSeconds;
+      const f = 1 - Math.max(0, p.life) / p.maxLife; // 0..1 flight progress
+      const dx = p.x1 - p.x0;
+      const dy = p.y1 - p.y0;
+      const x = p.x0 + dx * f;
+      const y = p.y0 + dy * f - Math.sin(Math.PI * f) * p.arc;
+      const g = p.g.clear();
+      if (p.kind === 'boulder') {
+        g.circle(x, y, 4).fill({ color: 0x6b6660 }).stroke({ width: 1, color: 0x39352f });
+      } else {
+        // Velocity direction (derivative of the parabola) for the arrow's angle.
+        const vy = dy - Math.cos(Math.PI * f) * Math.PI * p.arc;
+        const ang = Math.atan2(vy, dx);
+        const hx = Math.cos(ang);
+        const hy = Math.sin(ang);
+        const len = 9;
+        const tipX = x + hx * len;
+        const tipY = y + hy * len;
+        const px = -hy; // perpendicular, for the arrowhead barbs
+        const py = hx;
+        g.moveTo(x - hx * len, y - hy * len).lineTo(tipX, tipY).stroke({ width: 2, color: 0x2e2418 });
+        g.moveTo(tipX, tipY).lineTo(tipX - hx * 4 + px * 3, tipY - hy * 4 + py * 3)
+          .moveTo(tipX, tipY).lineTo(tipX - hx * 4 - px * 3, tipY - hy * 4 - py * 3)
+          .stroke({ width: 1.5, color: 0xcfcabf });
+      }
+      if (p.life <= 0) {
+        if (p.kind === 'boulder') this.burst('fx_dust', p.x1, p.y1, 5, 30);
+        else this.spawnEffect('fx_spark', p.x1, p.y1, { vy: -6, life: 0.22 });
+        p.g.destroy();
+        this.projectiles.splice(i, 1);
       }
     }
 

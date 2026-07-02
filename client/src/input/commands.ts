@@ -21,6 +21,7 @@ import {
   marketBuyTotal,
   marketSellTotal,
   townCenterCost,
+  visionOf,
 } from '../../../shared/stats.js';
 import type { Cost } from '../../../shared/stats.js';
 import type { ResourceType, VillagerJob } from '../../../shared/types.js';
@@ -417,8 +418,36 @@ export class Input {
     return best;
   }
 
+  // True only if every tile of the footprint is inside current own vision —
+  // you cannot build on fog (unexplored, or seen before but not visible now).
+  // Mirrors the server check (dispatch.ts footprintVisible). Admin reveal sees
+  // everything, so it skips this (server skips it too).
+  private footprintVisible(tileX: number, tileY: number, f: number): boolean {
+    if (this.state.adminReveal) return true;
+    for (let dy = 0; dy < f; dy++) {
+      for (let dx = 0; dx < f; dx++) {
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        let seen = false;
+        for (const e of this.state.entities.values()) {
+          const v = e.view;
+          if (v.owner !== this.state.playerId) continue;
+          const vr = Math.max(1, visionOf(v.kind));
+          // Same tile-grid distance test the server uses (vision.ts).
+          const cx = Math.floor(v.x / TILE);
+          const cy = Math.floor(v.y / TILE);
+          if ((tx - cx) * (tx - cx) + (ty - cy) * (ty - cy) <= vr * vr) { seen = true; break; }
+        }
+        if (!seen) return false;
+      }
+    }
+    return true;
+  }
+
   private placementValid(tileX: number, tileY: number, kind: EntityKind): boolean {
     const f = BUILDING_STATS[kind].footprint;
+    // You may only build on explored, currently-visible ground (no fog).
+    if (!this.footprintVisible(tileX, tileY, f)) return false;
     // Never inside enemy territory.
     if (footprintTouchesTerritory(this.enemyTerritorySources(), tileX, tileY, f)) return false;
     // TCs / camps go anywhere else; everything else needs your own territory.
@@ -434,7 +463,20 @@ export class Input {
     const ok = this.placementValid(tileX, tileY, this.pendingBuild);
     const cx2 = (tileX + f / 2) * TILE;
     const cy2 = (tileY + f / 2) * TILE;
-    this.ghost.clear()
+    this.ghost.clear();
+    // Preview the walkable courtyard ring (the dirt-path tiles this building
+    // reserves around its footprint — see entities.ts) so the blueprint shows
+    // its full footprint. Drawn first, under the body rect, and tinted with the
+    // same valid/invalid colour so the whole blueprint goes red when blocked.
+    const outline = BUILDING_STATS[this.pendingBuild].outline ?? 0;
+    for (let dy = -outline; dy < f + outline; dy++) {
+      for (let dx = -outline; dx < f + outline; dx++) {
+        if (dx >= 0 && dx < f && dy >= 0 && dy < f) continue; // under the body
+        this.ghost.rect((tileX + dx) * TILE, (tileY + dy) * TILE, TILE, TILE)
+          .fill({ color: ok ? 0x8a7a5a : 0xd06a6a, alpha: 0.2 });
+      }
+    }
+    this.ghost
       .rect(tileX * TILE, tileY * TILE, f * TILE, f * TILE)
       .fill({ color: ok ? 0x6ad06a : 0xd06a6a, alpha: 0.35 })
       .stroke({ width: 2, color: ok ? 0x9af09a : 0xf09a9a });

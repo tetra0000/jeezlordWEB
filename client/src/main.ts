@@ -50,6 +50,17 @@ function emitDeltaSounds(state: ClientState, msg: DeltaMsg, r: GameRenderer): vo
     }
   }
 
+  // Ranged shots loosed this tick: fly a visible arrow/boulder from shooter to
+  // target. Drawn if either endpoint is on screen; the bow twang is panned to
+  // the launch point.
+  for (const s of msg.shots ?? []) {
+    const sp0 = r.worldToScreen(s.x, s.y);
+    const sp1 = r.worldToScreen(s.tx, s.ty);
+    if (!onScreen(sp0.x, sp0.y) && !onScreen(sp1.x, sp1.y)) continue;
+    r.entities.spawnShot(s.x, s.y, s.tx, s.ty, s.kind);
+    if (s.kind === 'arrow') sound.play('bow', { pan: panAt(sp0.x), rate: vary(0.2) });
+  }
+
   // Deaths (any owner you could see) — distinct from units merely walking into
   // fog (those arrive only in `leave`). Units leave a lingering corpse.
   for (const id of msg.dead ?? []) {

@@ -4,6 +4,7 @@
 import { TILE } from '../../../shared/constants.js';
 import {
   BUILDING_STATS,
+  PROJECTILE_OF,
   combatOf,
   isBuilding,
   isResourceNode,
@@ -62,6 +63,9 @@ function acquireTarget(world: World, id: EntityId, owner: PlayerId, range: numbe
 }
 
 export function combatSystem(world: World, dt: number): void {
+  // Last tick's projectiles have been broadcast; clear before recording this
+  // tick's so a shot lives for exactly one delta.
+  world.shots.length = 0;
   for (const [id, cs] of world.combat) {
     if (cs.cooldownLeft > 0) cs.cooldownLeft = Math.max(0, cs.cooldownLeft - dt);
     cs.attacking = false;
@@ -112,6 +116,10 @@ export function combatSystem(world: World, dt: number): void {
         hp.hp -= stat.attack;
         cs.cooldownLeft = stat.attackCooldown;
         world.markDirty(targetId);
+        // Visible projectile for ranged attackers (cosmetic; damage above is
+        // instant). Captured at the moment of the swing, from attacker to target.
+        const proj = PROJECTILE_OF[kind];
+        if (proj) world.shots.push({ kind: proj, x: tf.x, y: tf.y, tx: ttf.x, ty: ttf.y, from: id, to: targetId });
         if (hp.hp <= 0) {
           killEntity(world, targetId);
           cs.targetId = null;

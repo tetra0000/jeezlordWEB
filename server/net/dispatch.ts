@@ -3,7 +3,7 @@
 // authoritative state (ownership, cost, footprint, population) — never trust
 // the client.
 import type { ClientMsg } from '../../shared/protocol.js';
-import { MAP_PX, TILE } from '../../shared/constants.js';
+import { MAP_PX, MAP_TILES, TILE } from '../../shared/constants.js';
 import {
   BUILDING_STATS,
   MARKET_MAX_MULT,
@@ -39,6 +39,7 @@ import {
 import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/movement.js';
 import { killEntity } from '../sim/systems/combat.js';
 import { spawnBuilding } from '../sim/spawn.js';
+import { visibleTileSet } from '../sim/systems/vision.js';
 import type { World } from '../sim/world.js';
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -101,6 +102,20 @@ function nearestOwnTcDistTiles(world: World, playerId: number, x: number, y: num
     best = Math.min(best, Math.hypot(tf.x - x, tf.y - y) / TILE);
   }
   return best;
+}
+
+// True only if every tile of the footprint is currently visible to the player
+// (which implies it has been explored). You may not build on fog — unexplored
+// or merely-remembered ground. Admin "reveal" sees the whole map, so it bypasses.
+function footprintVisible(world: World, playerId: number, tileX: number, tileY: number, footprint: number): boolean {
+  if (world.adminReveal.has(playerId)) return true;
+  const vis = visibleTileSet(world, playerId);
+  for (let dy = 0; dy < footprint; dy++) {
+    for (let dx = 0; dx < footprint; dx++) {
+      if (!vis.has((tileY + dy) * MAP_TILES + (tileX + dx))) return false;
+    }
+  }
+  return true;
 }
 
 function pay(world: World, playerId: number, c: Cost): void {
@@ -179,6 +194,14 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         return session.reject('out of bounds');
       if (!world.footprintFree(tileX, tileY, stat.footprint))
         return session.reject('space is occupied');
+      // Buildings with a courtyard (military buildings + the Town Center) reserve
+      // a walkable path ring around them; that ring may not overlap a wall, other
+      // building, resource node, or impassable terrain — so you can't place flush
+      // against a blocker.
+      if ((stat.outline ?? 0) > 0 && !world.outlineClear(tileX, tileY, stat.footprint, stat.outline!))
+        return session.reject('needs clear space around it');
+      if (!footprintVisible(world, playerId, tileX, tileY, stat.footprint))
+        return session.reject('cannot build on unexplored land');
       // Placement rules:
       //  - You may NEVER build inside another player's territory.
       //  - Town Centers, Lumber Camps and Mining Camps may go anywhere else (no

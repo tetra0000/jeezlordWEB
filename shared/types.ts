@@ -42,6 +42,21 @@ export type EntityKind =
 
 export type ResourceType = 'wood' | 'gold' | 'food' | 'stone';
 
+// A projectile a ranged attacker visibly looses. Purely cosmetic — the sim
+// resolves the damage instantly; this just tells the client what to draw flying.
+export type ProjectileKind = 'arrow' | 'boulder';
+
+// A single shot fired this tick: the launch (attacker) and impact (target)
+// world positions, so the client can fly a visible projectile between them.
+// Transient (lives for one delta), never persisted.
+export interface Shot {
+  kind: ProjectileKind;
+  x: number; // launch position (attacker)
+  y: number;
+  tx: number; // impact position (target)
+  ty: number;
+}
+
 // Villager jobs. Villagers are no longer hand-controlled — the player assigns
 // jobs and the sim auto-tasks each villager. "builder" is the default (assists
 // any unbuilt foundation inside the kingdom's territory); the rest gather a

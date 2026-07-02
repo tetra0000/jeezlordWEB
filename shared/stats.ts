@@ -2,7 +2,7 @@
 // pacing-agnostic. Times are in seconds, distances/speeds in pixels, vision in
 // tiles. v7 stretches these numbers for multi-day pacing; the global TIME_SCALE
 // env (read in the loop) can accelerate the whole sim for testing.
-import type { EntityKind, ResourceType, VillagerJob } from './types.js';
+import type { EntityKind, ProjectileKind, ResourceType, VillagerJob } from './types.js';
 
 export type Cost = Partial<{ wood: number; gold: number; food: number; stone: number }>;
 
@@ -218,6 +218,16 @@ export interface CombatStat {
 // time-to-kill). This game favours slow, deliberate battles over fast micro, so
 // units swing 5x slower than their base cadence. Tune here, not per-unit.
 export const COMBAT_DURATION_SCALE = 5;
+
+// Ranged attackers loose a visible projectile when they fire (cosmetic only —
+// damage is still applied instantly by the combat system). Melee units (absent
+// here) deal damage with no flying object. Archers/towers shoot arrows; the
+// catapult lobs a boulder.
+export const PROJECTILE_OF: Partial<Record<EntityKind, ProjectileKind>> = {
+  archer: 'arrow',
+  tower: 'arrow',
+  catapult: 'boulder',
+};
 
 export function combatOf(kind: EntityKind): CombatStat | null {
   if (isUnit(kind)) {

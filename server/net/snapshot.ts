@@ -4,7 +4,7 @@
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
 import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
-import type { EntityId, EntityView, JobReport, Pop, Stockpile, Vec2 } from '../../shared/types.js';
+import type { EntityId, EntityView, JobReport, Pop, Shot, Stockpile, Vec2 } from '../../shared/types.js';
 import type { Session } from './session.js';
 import type { World } from '../sim/world.js';
 import { MAP_TILES, TILE } from '../../shared/constants.js';
@@ -172,8 +172,17 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     session.lastDefeated = defeatedNow;
   }
 
+  // Ranged projectiles loosed this tick — only those whose shooter or target the
+  // player can currently see (same fog boundary as entities). Strip the ids; the
+  // wire only needs positions + kind. Transient, so never diffed against state.
+  let shots: Shot[] | undefined;
+  for (const s of world.shots) {
+    if (!current.has(s.from) && !current.has(s.to)) continue;
+    (shots ??= []).push({ kind: s.kind, x: s.x, y: s.y, tx: s.tx, ty: s.ty });
+  }
+
   if (enter.length === 0 && update.length === 0 && leave.length === 0 &&
-      !you && !pop && !jobs && !market && defeated === undefined)
+      !you && !pop && !jobs && !market && defeated === undefined && !shots)
     return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
   if (dead.length) delta.dead = dead;
@@ -182,5 +191,6 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   if (jobs) delta.jobs = jobs;
   if (market) delta.market = market;
   if (defeated !== undefined) delta.defeated = defeated;
+  if (shots) delta.shots = shots;
   return delta;
 }

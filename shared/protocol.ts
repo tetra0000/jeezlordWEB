@@ -8,6 +8,7 @@ import type {
   PlayerId,
   Pop,
   ResourceType,
+  Shot,
   Stockpile,
   VillagerJob,
 } from './types.js';
@@ -217,6 +218,7 @@ export interface DeltaMsg {
   jobs?: JobReport; // your villager-jobs summary (sent when it changes)
   market?: MarketState; // global market price multipliers (sent when they change)
   defeated?: boolean; // you have no units left (sent when this flips) — offer restart
+  shots?: Shot[]; // ranged projectiles loosed this tick that the player can see (cosmetic)
 }
 
 // Admin-mode state for the local player (whether the cheat panel is active, and
