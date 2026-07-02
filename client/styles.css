@@ -344,7 +344,7 @@ button:active {
    military squads are selected. */
 #stance-panel {
   position: absolute;
-  bottom: 58px;
+  bottom: 108px; /* clear of the build palette, which wraps to two rows */
   left: 50%;
   transform: translateX(-50%);
   display: flex;

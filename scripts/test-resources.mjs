@@ -9,7 +9,9 @@ import WebSocket from 'ws';
 
 const TILE = 32;
 const VIS = 230; // ~Town Center vision radius (px)
-const FAR = 500; // a "distant" node, clearly beyond any home unit's vision
+// A "distant" node: beyond home vision AND beyond every gather radius, so no
+// lumberjack/miner can quietly consume it while the scout is out.
+const FAR = 900;
 const user = 'res_' + Math.floor(Date.now() % 100000);
 const ws = new WebSocket('ws://localhost:8081/ws');
 const ents = new Map();
@@ -18,7 +20,7 @@ let stock = null;
 const send = (m) => ws.send(JSON.stringify(m));
 const own = (kind) => [...ents.values()].filter((e) => e.owner === pid && e.kind === kind);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const clampPx = (n) => Math.max(500, Math.min(15884, n));
+const clampPx = (n) => Math.max(500, Math.min(768 * TILE - 500, n));
 
 ws.on('open', () => send({ t: 'register', username: user, password: 'hunter2' }));
 ws.on('error', (e) => { console.error('ws', e.message); process.exit(1); });
@@ -99,7 +101,10 @@ const huntTimer = setInterval(() => {
     console.log('scout spawned', scoutId);
   }
   if (farNodeId < 0) {
-    const far = [...ents.values()].find((e) => e.owner == null && e.amount != null && dist(e, tc) > FAR);
+    // Not trees: one near the lumber camp's reach could be chopped (removed)
+    // before the final check, which would read as a fog leak.
+    const far = [...ents.values()].find((e) => e.owner == null
+      && (e.kind === 'gold' || e.kind === 'stone' || e.kind === 'berry') && dist(e, tc) > FAR);
     if (far) {
       farNodeId = far.id;
       console.log('discovered far node', farNodeId, 'dist', Math.round(dist(far, tc)));
@@ -111,7 +116,7 @@ const huntTimer = setInterval(() => {
     const ang = (hopSeed % 360) * (Math.PI / 180);
     send({ t: 'move', unitIds: [scoutId], x: clampPx(tc.x + Math.cos(ang) * 1600), y: clampPx(tc.y + Math.sin(ang) * 1600) });
   }
-}, 3500);
+}, 3000);
 
 // Final assertions.
 setTimeout(() => {
@@ -129,4 +134,4 @@ setTimeout(() => {
   const failed = results.filter((c) => !c).length;
   console.log(`\n${failed === 0 ? 'ALL PASS' : failed + ' FAILED'} (${results.length} checks)`);
   process.exit(failed === 0 ? 0 : 1);
-}, 45000);
+}, 75000);

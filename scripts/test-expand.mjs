@@ -27,23 +27,38 @@ const results = [];
 const check = (name, cond, extra = '') => { results.push(cond); console.log(`${cond ? 'PASS' : 'FAIL'}: ${name} ${extra}`); };
 
 let tc;
+let placed = false;
 setTimeout(() => {
   tc = own('townCenter')[0];
   check('Town Center starts named', !!tc?.name && typeof tc.name === 'string' && tc.name.length > 0, `name=${JSON.stringify(tc?.name)}`);
+  // Building on fog is forbidden, so scout the target area first: send the
+  // starting scout squad ~30 tiles out, then build camps inside ITS vision.
   const tcx = Math.round(tc.x / TILE), tcy = Math.round(tc.y / TILE);
-  const dir = tcx < 256 ? 1 : -1;
-  // Lumber camps ~30 tiles away — well outside the ~15-tile territory. Probe a
-  // spread so a stray resource node doesn't block every attempt.
-  for (let i = 0; i < 10; i++)
-    send({ t: 'build', kind: 'lumbercamp', tileX: tcx + dir * (28 + i), tileY: tcy + (i - 5) });
+  const dir = tcx < 384 ? 1 : -1;
+  const scout = own('scoutCavalry')[0];
+  send({ t: 'move', unitIds: [scout.id], x: (tcx + dir * 30) * TILE, y: tcy * TILE });
 }, 1500);
 
+// Once the scout is far enough out, probe camp placements around it (their
+// footprints are inside its vision, and well outside the ~15-tile territory).
+const probe = setInterval(() => {
+  if (placed || !tc) return;
+  const scout = own('scoutCavalry')[0];
+  if (!scout || Math.hypot(scout.x - tc.x, scout.y - tc.y) < 25 * TILE) return;
+  placed = true;
+  const sx = Math.round(scout.x / TILE), sy = Math.round(scout.y / TILE);
+  for (let i = 0; i < 10; i++)
+    send({ t: 'build', kind: 'lumbercamp', tileX: sx + (i % 4) - 2, tileY: sy + Math.floor(i / 4) - 1 });
+}, 1000);
+
 setTimeout(() => {
+  clearInterval(probe);
   const r = (tc.territory ?? 15) * TILE;
   const outside = own('lumbercamp').filter((e) => Math.hypot(e.x - tc.x, e.y - tc.y) > r);
+  check('scout reached the frontier (placement probes fired)', placed);
   check('Lumber Camp placed outside own territory', outside.length >= 1,
     `outside=${outside.length} total=${own('lumbercamp').length}`);
   const failed = results.filter((c) => !c).length;
   console.log(`\n${failed === 0 ? 'ALL PASS' : failed + ' FAILED'}`);
   process.exit(failed === 0 ? 0 : 1);
-}, 5000);
+}, 40000);

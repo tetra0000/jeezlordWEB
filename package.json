@@ -27,6 +27,7 @@
   "devDependencies": {
     "@types/ws": "^8.5.13",
     "esbuild": "^0.24.2",
+    "playwright-core": "^1.61.1",
     "pngjs": "^7.0.0",
     "typescript": "^5.7.2"
   }

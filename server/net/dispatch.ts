@@ -272,9 +272,8 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       // against a blocker.
       if ((stat.outline ?? 0) > 0 && !world.outlineClear(tileX, tileY, stat.footprint, stat.outline!))
         return session.reject('needs clear space around it');
-      if (!footprintVisible(world, playerId, tileX, tileY, stat.footprint))
-        return session.reject('cannot build on unexplored land');
-      // Placement rules:
+      // Placement rules (checked before the fog rule so the player gets the
+      // more informative error — "not your territory" beats "unexplored"):
       //  - You may NEVER build inside another player's territory.
       //  - Town Centers, Lumber Camps and Mining Camps may go anywhere else (no
       //    own territory required) — this is how you expand into new ground.
@@ -289,6 +288,8 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         if (!footprintInTerritory(sources, tileX, tileY, stat.footprint))
           return session.reject('must build inside your territory');
       }
+      if (!footprintVisible(world, playerId, tileX, tileY, stat.footprint))
+        return session.reject('cannot build on unexplored land');
       // Town Centers cost more the further they sit from your nearest existing
       // one (flat within TC_FREE_RADIUS_TILES, then growing); other buildings
       // use their fixed stat cost.

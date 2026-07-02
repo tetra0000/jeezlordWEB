@@ -39,8 +39,9 @@ setTimeout(() => {
   const dir = tcx < mapTiles / 2 ? 1 : -1;
   for (let i = 0; i < 8; i++)
     send({ t: 'build', kind: 'house', tileX: tcx + dir * (28 + i), tileY: tcy + (i - 4) });
-  // Just inside territory (a few tiles north): expect success.
-  send({ t: 'build', kind: 'house', tileX: tcx - 1, tileY: tcy - 4 });
+  // Just inside territory: expect success. Below the TC, clear of its no-build
+  // courtyard ring (outline 1 ⇒ ring ends at tcy+1) and of the starter nodes.
+  send({ t: 'build', kind: 'house', tileX: tcx - 1, tileY: tcy + 3 });
 }, 1500);
 
 setTimeout(() => {

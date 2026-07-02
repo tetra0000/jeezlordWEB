@@ -3,6 +3,51 @@
 Persistent shared-world RTS. Read this before editing; see the full roadmap at
 `C:\Users\User\.claude\plans\pure-weaving-music.md`.
 
+## Diplomacy (v11) — players start NEUTRAL
+
+- Every player pair has a relation: `neutral` (default) | `ally` | `war`
+  (`World.relations`, key `"a:b"` with a<b; `World.relationOf`). Persisted in
+  the `diplomacy` table; cleared for a player on defeat restart.
+- **Combat only happens at war.** Auto-acquire and commanded attacks both check
+  `relationOf === 'war'` (combat.ts `isEnemyOf`/`acquireTarget`; dispatch
+  `attack` rejects otherwise). Declaring war is UNILATERAL and open (the other
+  side is toasted); peace (war→neutral) and alliances (neutral→ally) need a
+  `propose` from one side and a `propose` back (= accept) — one pending offer
+  per pair in `World.diploOffers`. Breaking an alliance is unilateral.
+- **Allies share vision**: snapshot.ts unions allies' `visibleTileSet`s. Still
+  the single anti-cheat enforcement point.
+- Wire: `diplomacy` intent; per-player roster (`DeltaMsg.diplo`, every other
+  player + relation + offer) diffed client-side for toasts; menu in the
+  top-right "🤝 Diplomacy" button (`renderDiplo` in input/commands.ts).
+
+## Military squads, stances & formations (v11)
+
+- Military units are **SQUADS**: one entity = `UnitStat.squad` soldiers sharing
+  one hp pool. Damage output scales with men standing (`squadMen`/
+  `damageMultiplier` in stats.ts); the client draws one figure per man and hides
+  the fallen. Roster: militia/warrior/spearman + catapult (barracks),
+  archer/longbowman (archery range), scoutCavalry/knight/horseArcher (stable).
+  `bonusVs` gives class counters (spearmen 5x vs cavalry — a hard counter).
+  Archer squads volley one visible arrow per man.
+- **Stances** per squad (`CombatState.stance`, persisted in `ent_stance`):
+  aggressive (long chase leash) / defensive (default) / standGround (engage at
+  weapon range only, never move) / noAttack (never auto-engage). `stance`
+  intent; owner-only on the wire.
+- **Formations**: `move` intents may carry `formation: 'line'|'box'|'loose'`;
+  the server spreads destinations (`formationTargets` in dispatch.ts). The
+  bottom-centre stance/formation panel appears when squads are selected.
+
+## Trade caravans (v11)
+
+- Markets train `caravan` units (defenceless: `combatOf` returns null for
+  attack<=0). The `trade` intent routes caravans to a target market: another
+  player's market (any distance) or an own market ≥ `CARAVAN_MIN_OWN_TRADE_TILES`
+  away. Home = nearest own market. `trade.ts` shuttles home→target→home and
+  deposits `caravanGold(distTiles, foreign)` on each arrival home — foreign
+  markets pay +50% (`CARAVAN_FOREIGN_BONUS`). War with the target's owner cuts
+  the route; manual move/stop orders cancel it. Persisted in `ent_trade`.
+  Client: right-click a market with caravans selected.
+
 ## Architecture (the load-bearing ideas)
 
 - **The server is authoritative.** Clients send *intents* (`shared/protocol.ts`);
@@ -138,13 +183,15 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 
 `jobs` (reconcile villager job assignments + auto-task each villager to a
 node/farm/foundation) → `pathfinding` (A* on the tile grid, bounded request
-queue) → `movement` (follows waypoints off-grid) → `gather` (villager
-harvest/haul/deposit, incl. farms) → `farm` (auto-reseed empty farms) →
+queue) → `movement` (follows waypoints off-grid) → `separation` (ease crowds
+apart) → `gather` (villager harvest/haul/deposit, incl. farms) → `trade`
+(caravans arrive/turn around/deposit gold) → `farm` (auto-reseed empty farms) →
 `construction` (advance only with builders present) → `territory` (grow TC radii)
-→ `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill; a dying
-UNIT leaves a neutral `corpse` entity) → `corpse` (age + remove faded corpses) →
-`market` (drift global prices back to baseline) → `heal` (regen units in own
-territory). Each runs over ALL entities regardless of owner online status.
+→ `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill —
+war-relations + stances gate targeting; a dying UNIT leaves a neutral `corpse`
+entity) → `corpse` (age + remove faded corpses) → `market` (drift global prices
+back to baseline) → `heal` (regen units in own territory). Each runs over ALL
+entities regardless of owner online status.
 
 Other load-bearing pieces that aren't tick systems:
 - **Defeat/restart:** a player with 0 units (and none training) is `defeated`
@@ -181,6 +228,18 @@ gather/farm rates, costs, vision). Adjust pacing there, never in system code.
   `test-combat.mjs` / `test-farm.mjs` / `test-territory.mjs` /
   `test-resources.mjs` — end-to-end checks against a running (ideally
   `TIME_SCALE=30`) server.
+- In-process tests (no server; run against `dist/`): `test-squads.mjs`,
+  `test-stances.mjs`, `test-diplomacy.mjs`, `test-caravan.mjs`,
+  `test-heal.mjs`, `test-worldgen.mjs`.
+- `node scripts/render-map.mjs out.png` — generate + render a world to PNG
+  (eyeball rivers/bridges/mountains). `node scripts/dev-sprite-sheet.mjs out.png`
+  — contact sheet of all sprites.
+- **Map size:** `MAP_TILES` is 768. A DB seeded at another size can't migrate —
+  boot logs a warning; `node scripts/reset-world.mjs` regenerates. Worldgen:
+  heading-driven meandering rivers, straight 45°-snapped causeway bridges on
+  stable reaches, wandering ridges/massifs, dirt/flower ground variety. The
+  client tile layer is chunked (64 tiles) and culled per frame
+  (`render/tiles.ts` `TileLayer.cull`).
 
 ## Gotchas (this is the first persistent-process project here)
 
