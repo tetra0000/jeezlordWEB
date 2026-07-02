@@ -22,6 +22,8 @@ export async function loadAssets(): Promise<void> {
     tile_mountain: 'assets/tile_mountain.png',
     tile_mud: 'assets/tile_mud.png',
     tile_beach: 'assets/tile_beach.png',
+    tile_dirt: 'assets/tile_dirt.png',
+    tile_flowers: 'assets/tile_flowers.png',
     tile_forestground: 'assets/tile_forestground.png',
     tile_path: 'assets/tile_path.png',
   };

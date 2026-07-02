@@ -3,7 +3,7 @@
 // the drag selection box. Owns screen<->world coordinate conversion. Layers are
 // persistent; setMap only rebuilds the tile contents.
 import { Application, Container, Graphics } from 'pixi.js';
-import { buildTileLayer } from './tiles.js';
+import { TileLayer } from './tiles.js';
 import { EntityLayer } from './entities.js';
 import { TerritoryLayer } from './territory.js';
 import { Fog } from './fog.js';
@@ -11,18 +11,18 @@ import { Fog } from './fog.js';
 export class GameRenderer {
   readonly app = new Application();
   readonly world = new Container(); // camera: position + scale applied here
+  readonly tiles = new TileLayer();
   readonly territory = new TerritoryLayer();
   readonly entities = new EntityLayer();
   readonly fog = new Fog();
   readonly selectionBox = new Graphics(); // screen-space overlay
-  private readonly tileHolder = new Container();
 
   async init(): Promise<void> {
     await this.app.init({ resizeTo: window, background: 0x101410, antialias: true });
     document.body.appendChild(this.app.canvas);
     this.app.stage.addChild(this.world);
     // z-order: tiles < territory < entities < fog.
-    this.world.addChild(this.tileHolder);
+    this.world.addChild(this.tiles.container);
     this.world.addChild(this.territory.container);
     this.world.addChild(this.entities.container);
     this.world.addChild(this.fog.container);
@@ -30,8 +30,7 @@ export class GameRenderer {
   }
 
   setMap(mapTiles: number, tile: number, terrain: Uint8Array | null): void {
-    this.tileHolder.removeChildren();
-    this.tileHolder.addChild(buildTileLayer(mapTiles, tile, terrain));
+    this.tiles.build(mapTiles, tile, terrain);
     this.fog.resetExplored(); // new map — forget previously-explored area
   }
 

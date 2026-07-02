@@ -1,8 +1,8 @@
 // Core world constants shared by client and server. Pure data — no Node/DOM APIs.
 
 export const TILE = 32; // pixels per tile edge
-export const MAP_TILES = 512; // world is MAP_TILES x MAP_TILES tiles
-export const MAP_PX = MAP_TILES * TILE; // 16384 px
+export const MAP_TILES = 768; // world is MAP_TILES x MAP_TILES tiles
+export const MAP_PX = MAP_TILES * TILE; // 24576 px
 
 // Per-tile terrain codes (one byte per tile in World.terrain). Grass is the
 // default/passable ground; water is impassable; a bridge sits over water and is
@@ -19,6 +19,10 @@ export const TERRAIN_MOUNTAIN = 3;
 // block). New tiles in v10's terrain-variety pass.
 export const TERRAIN_MUD = 4;
 export const TERRAIN_BEACH = 5;
+// More cosmetic ground variety: dry dirt patches and flower meadows, scattered
+// as organic blobs across the grassland. PASSABLE exactly like grass.
+export const TERRAIN_DIRT = 6;
+export const TERRAIN_FLOWERS = 7;
 
 export const TICK_HZ = 10; // authoritative simulation rate
 export const TICK_MS = 1000 / TICK_HZ;

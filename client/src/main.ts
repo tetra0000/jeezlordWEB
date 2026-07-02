@@ -265,12 +265,14 @@ async function boot(): Promise<void> {
     const tl = renderer.screenToWorld(0, 0);
     const br = renderer.screenToWorld(renderer.screenWidth, renderer.screenHeight);
     const pad = TILE * 4; // cover large building footprints + reduce pan pop-in
-    renderer.entities.frame(state, dt, {
+    const view = {
       minX: tl.x - pad,
       minY: tl.y - pad,
       maxX: br.x + pad,
       maxY: br.y + pad,
-    });
+    };
+    renderer.entities.frame(state, dt, view);
+    renderer.tiles.cull(view); // hide off-screen terrain chunks
 
     // Fog + territory barely change frame-to-frame and each rebuild their
     // Graphics geometry over a full scan of the world, so refresh them at ~20 Hz

@@ -40,6 +40,7 @@ check('spearman deals 1x vs warrior', damageMultiplier('spearman', maxHpOf('spea
   const world = new World();
   world.players.set(1, { id: 1, name: 'a', color: 1, spawnTileX: 10, spawnTileY: 10, stockpile: { wood: 0, gold: 0, food: 0, stone: 0 }, jobDesired: {} });
   world.players.set(2, { id: 2, name: 'b', color: 2, spawnTileX: 12, spawnTileY: 10, stockpile: { wood: 0, gold: 0, food: 0, stone: 0 }, jobDesired: {} });
+  world.setRelation(1, 2, 'war'); // diplomacy: combat only happens at war
   // Spawn inside melee range (the bare combatSystem loop runs no movement).
   const spear = spawnUnit(world, 'spearman', 1, 10 * TILE, 10 * TILE);
   const knight = spawnUnit(world, 'knight', 2, 10 * TILE + 18, 10 * TILE);
@@ -54,6 +55,7 @@ check('spearman deals 1x vs warrior', damageMultiplier('spearman', maxHpOf('spea
   const world = new World();
   world.players.set(1, { id: 1, name: 'a', color: 1, spawnTileX: 10, spawnTileY: 10, stockpile: { wood: 0, gold: 0, food: 0, stone: 0 }, jobDesired: {} });
   world.players.set(2, { id: 2, name: 'b', color: 2, spawnTileX: 12, spawnTileY: 10, stockpile: { wood: 0, gold: 0, food: 0, stone: 0 }, jobDesired: {} });
+  world.setRelation(1, 2, 'war'); // diplomacy: combat only happens at war
   const archer = spawnUnit(world, 'archer', 1, 10 * TILE, 10 * TILE);
   const target = spawnUnit(world, 'warrior', 2, 12 * TILE, 10 * TILE);
   world.health.get(target).hp = 100000; // keep it alive; we only care about shots

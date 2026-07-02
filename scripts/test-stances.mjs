@@ -17,6 +17,7 @@ function makeWorld() {
   for (const pid of [1, 2]) {
     world.players.set(pid, { id: pid, name: `p${pid}`, color: pid, spawnTileX: 10, spawnTileY: 10, stockpile: { wood: 0, gold: 0, food: 0, stone: 0 }, jobDesired: {} });
   }
+  world.setRelation(1, 2, 'war'); // diplomacy: stances only matter at war
   return world;
 }
 const session = (pid) => ({ playerId: pid, rejects: [], reject(r) { this.rejects.push(r); }, send() {} });

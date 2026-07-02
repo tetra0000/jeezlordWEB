@@ -1,7 +1,10 @@
 // Minimap drawn on a plain 2D canvas: own entities (bright), currently-visible
 // others (server-filtered, so out-of-vision enemies never appear), and the
 // camera viewport rectangle. Click to recentre the camera.
-import { MAP_PX, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH } from '../../../shared/constants.js';
+import {
+  MAP_PX, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
+  TERRAIN_DIRT, TERRAIN_FLOWERS,
+} from '../../../shared/constants.js';
 import { isBuilding, isResourceNode } from '../../../shared/stats.js';
 import type { ClientState } from '../state.js';
 import type { GameRenderer } from './app.js';
@@ -35,46 +38,60 @@ export class Minimap {
     });
   }
 
-  // Rasterize the terrain grid into an offscreen canvas at minimap resolution.
+  // Rasterize the terrain grid via ImageData at tile resolution (one write per
+  // tile — no per-tile fillRect calls, which get slow on the 768-tile map),
+  // then downscale into a minimap-sized canvas once.
   private buildTerrain(terrain: Uint8Array, mapTiles: number): HTMLCanvasElement {
+    const src = document.createElement('canvas');
+    src.width = mapTiles;
+    src.height = mapTiles;
+    const sctx = src.getContext('2d')!;
+    const img = sctx.createImageData(mapTiles, mapTiles);
+    const d = img.data;
+    // [r, g, b] per terrain code; grass-likes use the dark base.
+    const BASE: [number, number, number] = [0x11, 0x16, 0x0f];
+    const COLOR: Record<number, [number, number, number]> = {
+      [TERRAIN_WATER]: [0x2c, 0x5a, 0x86],
+      [TERRAIN_BRIDGE]: [0x8a, 0x5a, 0x32],
+      [TERRAIN_MOUNTAIN]: [0x56, 0x54, 0x5a],
+      [TERRAIN_MUD]: [0x6b, 0x4a, 0x2a],
+      [TERRAIN_BEACH]: [0xd9, 0xc8, 0x9a],
+      [TERRAIN_DIRT]: [0x4a, 0x3e, 0x28],
+      [TERRAIN_FLOWERS]: [0x2a, 0x38, 0x1e],
+    };
+    for (let i = 0; i < terrain.length; i++) {
+      const c = COLOR[terrain[i]] ?? BASE;
+      const o = i * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+    sctx.putImageData(img, 0, 0);
     const c = document.createElement('canvas');
     c.width = this.size;
     c.height = this.size;
-    const tctx = c.getContext('2d')!;
-    tctx.fillStyle = '#11160f'; // grass / unexplored base
-    tctx.fillRect(0, 0, this.size, this.size);
-    const px = this.size / mapTiles;
-    const cell = Math.max(1, Math.ceil(px));
-    for (let ty = 0; ty < mapTiles; ty++) {
-      for (let tx = 0; tx < mapTiles; tx++) {
-        const code = terrain[ty * mapTiles + tx];
-        if (code !== TERRAIN_WATER && code !== TERRAIN_BRIDGE && code !== TERRAIN_MOUNTAIN
-          && code !== TERRAIN_MUD && code !== TERRAIN_BEACH) continue;
-        tctx.fillStyle = code === TERRAIN_WATER ? '#2c5a86'
-          : code === TERRAIN_MOUNTAIN ? '#56545a'
-          : code === TERRAIN_MUD ? '#6b4a2a'
-          : code === TERRAIN_BEACH ? '#d9c89a'
-          : '#8a5a32';
-        tctx.fillRect(tx * px, ty * px, cell, cell);
-      }
-    }
+    c.getContext('2d')!.drawImage(src, 0, 0, this.size, this.size);
     return c;
   }
 
-  // Black overlay with a transparent hole punched for every explored tile, so
-  // unexplored minimap area reads as fog. Rebuilt only when exploration changes.
+  // Fog overlay: opaque where never explored, transparent where explored. Built
+  // via ImageData at tile resolution and downscaled — this rebuilds every time
+  // exploration grows, so it has to be cheap.
   private buildUnexplored(explored: Uint8Array, mapTiles: number): HTMLCanvasElement {
+    const src = document.createElement('canvas');
+    src.width = mapTiles;
+    src.height = mapTiles;
+    const sctx = src.getContext('2d')!;
+    const img = sctx.createImageData(mapTiles, mapTiles);
+    const d = img.data;
+    for (let i = 0; i < explored.length; i++) {
+      if (explored[i]) continue; // transparent
+      const o = i * 4;
+      d[o] = 3; d[o + 1] = 5; d[o + 2] = 8; d[o + 3] = 235;
+    }
+    sctx.putImageData(img, 0, 0);
     const c = document.createElement('canvas');
     c.width = this.size;
     c.height = this.size;
-    const tctx = c.getContext('2d')!;
-    tctx.fillStyle = 'rgba(3,5,8,0.92)';
-    tctx.fillRect(0, 0, this.size, this.size);
-    const px = this.size / mapTiles;
-    const cell = Math.max(1, Math.ceil(px));
-    for (let ty = 0; ty < mapTiles; ty++)
-      for (let tx = 0; tx < mapTiles; tx++)
-        if (explored[ty * mapTiles + tx]) tctx.clearRect(tx * px, ty * px, cell, cell);
+    c.getContext('2d')!.drawImage(src, 0, 0, this.size, this.size);
     return c;
   }
 

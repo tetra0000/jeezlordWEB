@@ -4,7 +4,7 @@
 import type { WebSocket } from 'ws';
 import { encode, type ServerMsg } from '../../shared/protocol.js';
 import type { EntityId, EntityView, PlayerId, Pop, Stockpile } from '../../shared/types.js';
-import { MAP_TILES, TILE, TERRAIN_GRASS } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_DIRT, TERRAIN_FLOWERS } from '../../shared/constants.js';
 import { encodeTerrainRLE } from '../../shared/terrain.js';
 import { BUILDING_STATS } from '../../shared/stats.js';
 import type { Db } from '../db/db.js';
@@ -63,8 +63,11 @@ const SPAWN_EDGE_MARGIN = 14; // keep clear of the map border
 const SPAWN_DRY_RADIUS = 7; // tiles around the spawn that must be water-free
 function spawnAreaDry(world: World, x: number, y: number): boolean {
   for (let dy = -SPAWN_DRY_RADIUS; dy <= SPAWN_DRY_RADIUS; dy++)
-    for (let dx = -SPAWN_DRY_RADIUS; dx <= SPAWN_DRY_RADIUS; dx++)
-      if (world.terrainAt(x + dx, y + dy) !== TERRAIN_GRASS) return false;
+    for (let dx = -SPAWN_DRY_RADIUS; dx <= SPAWN_DRY_RADIUS; dx++) {
+      const t = world.terrainAt(x + dx, y + dy);
+      // Grass-like cosmetic ground (dirt patches, flower meadows) is fine too.
+      if (t !== TERRAIN_GRASS && t !== TERRAIN_DIRT && t !== TERRAIN_FLOWERS) return false;
+    }
   return true;
 }
 

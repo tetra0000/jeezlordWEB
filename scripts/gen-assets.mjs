@@ -335,15 +335,61 @@ function berry() {
 
 // --- tile + effects --------------------------------------------------------
 function grass() {
-  const im = new Img(32, 32);
+  // 64x64 (2x2 tiles per repeat) with layered speckles + a few grass blades so
+  // the repeat is less obvious over the big map.
+  const S = 64;
+  const im = new Img(S, S);
   let seed = 12345;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-  im.rect(0, 0, 32, 32, [74, 112, 60]);
-  for (let i = 0; i < 90; i++) {
-    const c = rnd() > 0.5 ? [82, 124, 66] : [64, 100, 52];
-    im.px(rnd() * 32, rnd() * 32, c);
+  im.rect(0, 0, S, S, [74, 112, 60]);
+  // Soft mottling: sparse 2px patches of lighter/darker green.
+  for (let i = 0; i < 140; i++) {
+    const c = rnd() > 0.5 ? [80, 120, 64] : [68, 104, 55];
+    const x = rnd() * S, y = rnd() * S;
+    im.rect(x, y, 2, 2, c, 160);
+  }
+  // Fine speckles.
+  for (let i = 0; i < 320; i++) {
+    const c = rnd() > 0.5 ? [86, 128, 70] : [62, 96, 50];
+    im.px(rnd() * S, rnd() * S, c);
+  }
+  // A few tiny grass blades (2px verticals with a lighter tip).
+  for (let i = 0; i < 26; i++) {
+    const x = Math.floor(rnd() * S), y = Math.floor(rnd() * S);
+    im.px(x, y, [66, 104, 54]);
+    im.px(x, y - 1, [96, 140, 76]);
   }
   im.save('tile_grass');
+}
+function dirt() {
+  const im = new Img(32, 32);
+  let seed = 3411;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [138, 116, 78]); // dry packed earth
+  const specks = [[156, 134, 94], [118, 98, 64], [146, 126, 88], [104, 88, 58]];
+  for (let i = 0; i < 110; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 4)], 140 + rnd() * 100);
+  // A couple of small pebbles.
+  for (let i = 0; i < 4; i++) im.circle(rnd() * 32, rnd() * 32, 1, [160, 152, 140], 200);
+  im.save('tile_dirt');
+}
+function flowers() {
+  const im = new Img(32, 32);
+  let seed = 9013;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [78, 118, 62]); // slightly lusher grass base
+  for (let i = 0; i < 70; i++) {
+    const c = rnd() > 0.5 ? [88, 130, 70] : [70, 106, 56];
+    im.px(rnd() * 32, rnd() * 32, c);
+  }
+  // Scattered blossom heads in a few colours, with the odd white daisy.
+  const petals = [[228, 176, 84], [216, 120, 150], [200, 90, 90], [236, 232, 220], [150, 130, 220]];
+  for (let i = 0; i < 9; i++) {
+    const x = 2 + rnd() * 28, y = 2 + rnd() * 28;
+    const c = petals[Math.floor(rnd() * petals.length)];
+    im.px(x, y, c); im.px(x + 1, y, c); im.px(x, y + 1, c); im.px(x + 1, y + 1, c);
+    im.px(x + 0.5, y + 0.5, [250, 240, 160]); // centre
+  }
+  im.save('tile_flowers');
 }
 function water() {
   const im = new Img(32, 32);
@@ -477,6 +523,8 @@ bridge();
 mountain();
 mud();
 beach();
+dirt();
+flowers();
 path();
 
 fx('chop', (im) => { for (const [x, y] of [[6, 6], [9, 5], [7, 9], [10, 9]]) im.rect(x, y, 2, 2, [150, 100, 50]); });

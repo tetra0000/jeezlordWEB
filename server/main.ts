@@ -65,6 +65,20 @@ function main(): void {
     db.setMeta('terrain', Buffer.from(world.terrain).toString('base64'));
     db.setMeta('seeded', '1');
     flush(db, world);
+  } else {
+    // Map-size upgrade guard: a world seeded at an older MAP_TILES has a
+    // terrain blob that no longer fits — the loader ignored it, leaving blank
+    // terrain. That world can't be migrated in place; it needs a reset.
+    const terr = db.getMeta('terrain');
+    const expected = world.terrain.length;
+    if (terr && Buffer.from(terr, 'base64').length !== expected) {
+      console.error(
+        `[main] *** The stored world was generated for a different map size ` +
+        `(terrain blob ${Buffer.from(terr, 'base64').length} B, expected ${expected} B). ` +
+        `Terrain is blank. Run \`node scripts/reset-world.mjs\` to regenerate the world ` +
+        `on the new ${Math.sqrt(expected)}-tile map. ***`,
+      );
+    }
   }
 
   const online = new Map<PlayerId, Session>();
