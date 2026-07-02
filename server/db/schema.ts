@@ -98,13 +98,21 @@ export function initSchema(db: DatabaseSync): void {
       y         REAL NOT NULL
     );
 
-    -- Per-building extras: town-center name + territory radius, farm reseed flag.
-    -- Columns are nullable; which apply depends on the building kind.
+    -- Per-building extras: town-center name + territory radius, farm reseed
+    -- flag, gate mode. Columns are nullable; which apply depends on the kind.
     CREATE TABLE IF NOT EXISTS ent_building_meta (
       entity_id INTEGER PRIMARY KEY,
       name      TEXT,
       radius    REAL,
-      farm_auto INTEGER
+      farm_auto INTEGER,
+      gate_mode TEXT
+    );
+
+    -- Caravan road wear per tile (cosmetic ground state, 0..1). Sparse: only
+    -- tiles caravans have actually worn.
+    CREATE TABLE IF NOT EXISTS road_wear (
+      tile INTEGER PRIMARY KEY,
+      wear REAL NOT NULL
     );
 
     -- Caravan trade routes (home/target market entity ids).
@@ -157,6 +165,12 @@ export function initSchema(db: DatabaseSync): void {
   const gatherCols = db.prepare(`PRAGMA table_info(ent_gather)`).all() as Array<{ name: string }>;
   if (!gatherCols.some((c) => c.name === 'job')) {
     db.exec(`ALTER TABLE ent_gather ADD COLUMN job TEXT NOT NULL DEFAULT 'builder'`);
+  }
+
+  // v12 migration: add ent_building_meta.gate_mode to pre-gates databases.
+  const metaCols = db.prepare(`PRAGMA table_info(ent_building_meta)`).all() as Array<{ name: string }>;
+  if (!metaCols.some((c) => c.name === 'gate_mode')) {
+    db.exec(`ALTER TABLE ent_building_meta ADD COLUMN gate_mode TEXT`);
   }
 
   // Stamp / verify schema version.

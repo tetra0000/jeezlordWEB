@@ -39,14 +39,15 @@ import { KIND_STYLE, ownerColor } from '../render/colors.js';
 import { sound, panAt } from '../audio/sound.js';
 
 const DRAG_THRESHOLD = 5;
+const DOUBLE_CLICK_MS = 400;
 const BUILDABLE: EntityKind[] = [
   'townCenter', 'house', 'mill', 'lumbercamp', 'miningcamp',
-  'farm', 'market', 'barracks', 'range', 'stable', 'tower', 'wall',
+  'farm', 'market', 'barracks', 'range', 'stable', 'tower', 'wall', 'gate',
 ];
 const LABEL: Record<string, string> = {
   townCenter: 'Town Center', house: 'House', mill: 'Mill', lumbercamp: 'Lumber Camp',
   miningcamp: 'Mining Camp', farm: 'Farm', market: 'Market', barracks: 'Barracks', range: 'Archery', stable: 'Stable',
-  tower: 'Tower', wall: 'Wall', villager: 'Villager',
+  tower: 'Tower', wall: 'Wall', gate: 'Gate', villager: 'Villager',
   militia: 'Militia', warrior: 'Warriors', spearman: 'Spearmen', archer: 'Archers',
   longbowman: 'Longbowmen', scoutCavalry: 'Scout Cavalry', knight: 'Knights',
   horseArcher: 'Horse Archers', catapult: 'Catapult', caravan: 'Trade Caravan',
@@ -67,7 +68,8 @@ const DESC: Record<string, string> = {
   range: 'Trains Archer and Longbowman squads.',
   stable: 'Trains Scout Cavalry, Knights and Horse Archers.',
   tower: 'Defensive tower: fires at nearby enemies and has long vision. Build on your frontier.',
-  wall: 'Cheap, tough barrier that blocks enemy movement.',
+  wall: 'Cheap, tough barrier that blocks enemy movement. Click and DRAG to lay a whole run of wall at once.',
+  gate: 'A wall segment traffic can pass through. Select it to set who may pass: locked, open for trade (you, allies and caravans), or open to everyone.',
   // units (military units are SQUADS: they lose men, and damage, as hp drops)
   villager: 'Gathers resources and builds/repairs. Assign jobs in the Villagers panel (bottom-left).',
   militia: 'Squad of 4. Cheap, quick to raise — a mob with clubs. Melts against real soldiers.',
@@ -106,6 +108,13 @@ const FORMATIONS: Array<{ id: Formation; icon: string; name: string; desc: strin
   { id: 'loose', icon: '⁘', name: 'Loose', desc: 'Move orders spread the squads out — fewer losses to catapults and volleys.' },
 ];
 
+// Gate modes (buttons on a selected gate's info panel).
+const GATE_MODES: Array<{ id: 'locked' | 'trade' | 'open'; icon: string; name: string; desc: string }> = [
+  { id: 'locked', icon: '🔒', name: 'Locked', desc: 'Nobody passes — the gate acts as a solid wall (even to you).' },
+  { id: 'trade', icon: '🛒', name: 'Trade', desc: 'You, your allies and any non-enemy trade caravan may pass. The default.' },
+  { id: 'open', icon: '🔓', name: 'Open', desc: 'Everyone may pass — including enemies. Handy in peacetime.' },
+];
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c),
@@ -128,6 +137,25 @@ export class Input {
   private startY = 0;
   private shift = false;
   private pendingBuild: EntityKind | null = null;
+  // Right-click-hold drag: on release the selected units form up along the
+  // dragged line (an explicit line order).
+  private rightDown = false;
+  private rightDragging = false;
+  private rStartX = 0;
+  private rStartY = 0;
+  private readonly lineG = new Graphics(); // world-space line-order preview
+  // Wall drag-building: pointer-down tile while laying a run of wall.
+  private wallDragStart: { tileX: number; tileY: number } | null = null;
+  private wallDragEnd: { tileX: number; tileY: number } | null = null;
+  // Double-click select-all-of-type state.
+  private lastClickAt = 0;
+  private lastClickId: number | null = null;
+  // Control groups (Ctrl+digit stores, digit recalls, double-tap centres).
+  private readonly groups = new Map<string, number[]>();
+  private lastGroupKey = '';
+  private lastGroupAt = 0;
+  // Idle-unit cycling ('.' civilians, ',' military).
+  private idleCycle: Record<'civilian' | 'military', number> = { civilian: -1, military: -1 };
   private readonly ghost = new Graphics();
   // World-space label shown above the ghost while placing a Town Center: its
   // distance-scaled cost (TCs get pricier the further they sit from your nearest
@@ -175,6 +203,7 @@ export class Input {
     this.ghostLabel.anchor.set(0.5, 1);
     this.ghostLabel.visible = false;
     r.world.addChild(this.ghostLabel);
+    r.world.addChild(this.lineG);
     const canvas = r.app.canvas;
 
     window.addEventListener('keydown', (e) => {
@@ -188,6 +217,20 @@ export class Input {
       if (e.key === 'Shift') this.shift = true;
       if (e.key === 'Escape') this.cancelPlacement();
       if (e.key === 'Delete') this.deleteSelected();
+      // Control groups: Ctrl+digit stores the selection; digit recalls it
+      // (double-tap also centres the camera on the group).
+      if (e.key >= '0' && e.key <= '9' && !e.altKey && !e.metaKey) {
+        if (e.ctrlKey) {
+          e.preventDefault();
+          this.storeGroup(e.key);
+        } else {
+          this.recallGroup(e.key);
+        }
+      }
+      // Idle-unit cycling: '.' steps through idle civilians (villagers +
+      // caravans), ',' through idle military squads.
+      if (e.key === '.') this.cycleIdle('civilian');
+      if (e.key === ',') this.cycleIdle('military');
     });
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Shift') this.shift = false;
@@ -227,6 +270,15 @@ export class Input {
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button === 0) {
         if (this.pendingBuild) {
+          // Walls are drag-buildable: pointer-down anchors the run, pointer-up
+          // lays it. Everything else places on the click as before.
+          if (this.pendingBuild === 'wall') {
+            const { tileX, tileY } = this.ghostTile(e.clientX, e.clientY);
+            this.wallDragStart = { tileX, tileY };
+            this.wallDragEnd = { tileX, tileY };
+            this.updateGhost(e.clientX, e.clientY);
+            return;
+          }
           this.placeBuilding(e.clientX, e.clientY);
           return;
         }
@@ -235,8 +287,16 @@ export class Input {
         this.startX = e.clientX;
         this.startY = e.clientY;
       } else if (e.button === 2) {
-        if (this.pendingBuild) this.cancelPlacement();
-        else this.onRightClick(e.clientX, e.clientY);
+        if (this.pendingBuild) {
+          this.cancelPlacement();
+          return;
+        }
+        // The command fires on RELEASE: a plain click is the usual context
+        // command; holding + dragging draws the line the units will form on.
+        this.rightDown = true;
+        this.rightDragging = false;
+        this.rStartX = e.clientX;
+        this.rStartY = e.clientY;
       }
     });
 
@@ -244,6 +304,13 @@ export class Input {
       this.updateCoords(e.clientX, e.clientY);
       if (this.pendingBuild) this.updateGhost(e.clientX, e.clientY);
       this.updateTooltip(e.clientX, e.clientY);
+      if (this.rightDown) {
+        if (!this.rightDragging
+          && Math.hypot(e.clientX - this.rStartX, e.clientY - this.rStartY) > DRAG_THRESHOLD * 2
+          && this.selectedUnits().length > 0)
+          this.rightDragging = true;
+        if (this.rightDragging) this.drawLinePreview(e.clientX, e.clientY);
+      }
       if (!this.leftDown) return;
       if (!this.dragging && Math.hypot(e.clientX - this.startX, e.clientY - this.startY) > DRAG_THRESHOLD)
         this.dragging = true;
@@ -253,13 +320,130 @@ export class Input {
     canvas.addEventListener('pointerleave', () => this.tooltipEl.classList.add('hidden'));
 
     window.addEventListener('pointerup', (e) => {
-      if (e.button !== 0 || !this.leftDown) return;
+      if (e.button === 2) {
+        if (this.wallDragStart) return; // wall runs are laid by the left button
+        if (!this.rightDown) return;
+        this.rightDown = false;
+        this.lineG.clear();
+        if (this.rightDragging) this.sendLineOrder(e.clientX, e.clientY);
+        else this.onRightClick(e.clientX, e.clientY);
+        this.rightDragging = false;
+        return;
+      }
+      if (e.button !== 0) return;
+      if (this.wallDragStart) {
+        this.placeWallLine(e.clientX, e.clientY);
+        this.wallDragStart = null;
+        this.wallDragEnd = null;
+        if (!this.shift && this.pendingBuild) this.cancelPlacement();
+        return;
+      }
+      if (!this.leftDown) return;
       this.leftDown = false;
       this.r.selectionBox.clear();
       if (this.dragging) this.boxSelect(e.clientX, e.clientY);
       else this.clickSelect(e.clientX, e.clientY);
       this.dragging = false;
     });
+  }
+
+  // --- control groups ---------------------------------------------------------
+  private storeGroup(key: string): void {
+    const ids = [...this.state.selection];
+    if (ids.length === 0) {
+      this.groups.delete(key);
+      this.showToast(`group ${key} cleared`);
+      return;
+    }
+    this.groups.set(key, ids);
+    this.showToast(`group ${key} set (${ids.length})`);
+  }
+
+  private recallGroup(key: string): void {
+    const stored = this.groups.get(key);
+    if (!stored) return;
+    const live = stored.filter((id) => this.state.entities.has(id));
+    if (live.length === 0) return;
+    this.state.selection.clear();
+    for (const id of live) this.state.selection.add(id);
+    sound.play('select');
+    // Double-tap the same group key to centre the camera on it.
+    const now = performance.now();
+    if (this.lastGroupKey === key && now - this.lastGroupAt < DOUBLE_CLICK_MS) {
+      let cx = 0, cy = 0;
+      for (const id of live) {
+        const e = this.state.entities.get(id)!;
+        cx += e.view.x;
+        cy += e.view.y;
+      }
+      this.centerCamera(cx / live.length, cy / live.length);
+    }
+    this.lastGroupKey = key;
+    this.lastGroupAt = now;
+  }
+
+  // --- idle-unit cycling --------------------------------------------------------
+  // '.' steps through idle civilians (villagers with nothing to do + caravans
+  // without a route), ',' through idle military squads. Selects and centres.
+  private cycleIdle(cat: 'civilian' | 'military'): void {
+    const ids: number[] = [];
+    for (const [id, e] of this.state.entities) {
+      const v = e.view;
+      if (v.owner !== this.state.playerId || isBuilding(v.kind) || !isUnit(v.kind)) continue;
+      const civilian = v.kind === 'villager' || v.kind === 'caravan';
+      if ((cat === 'civilian') !== civilian) continue;
+      if (v.action) continue; // busy (moving / gathering / fighting / building)
+      if (v.kind === 'caravan' && v.trade) continue; // waiting at a market mid-route
+      ids.push(id);
+    }
+    if (ids.length === 0) {
+      this.showToast(cat === 'civilian' ? 'no idle civilians' : 'no idle military');
+      return;
+    }
+    ids.sort((a, b) => a - b);
+    this.idleCycle[cat] = (this.idleCycle[cat] + 1) % ids.length;
+    const id = ids[this.idleCycle[cat]];
+    this.state.selection.clear();
+    this.state.selection.add(id);
+    const e = this.state.entities.get(id)!;
+    this.centerCamera(e.view.x, e.view.y);
+    sound.play('select');
+    this.showToast(`idle ${LABEL[e.view.kind] ?? e.view.kind} (${this.idleCycle[cat] + 1}/${ids.length})`);
+  }
+
+  private centerCamera(wx: number, wy: number): void {
+    const s = this.r.world.scale.x;
+    this.r.world.x = this.r.screenWidth / 2 - wx * s;
+    this.r.world.y = this.r.screenHeight / 2 - wy * s;
+  }
+
+  // --- right-drag line orders -----------------------------------------------
+  // Preview the line the selection will form on: the segment plus a slot dot
+  // per unit, so you can see exactly where each squad will stand.
+  private drawLinePreview(cx: number, cy: number): void {
+    const g = this.lineG;
+    g.clear();
+    const a = this.r.screenToWorld(this.rStartX, this.rStartY);
+    const b = this.r.screenToWorld(cx, cy);
+    const n = this.selectedUnits().length;
+    if (n === 0) return;
+    g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 2.5, color: 0x8ad06a, alpha: 0.85 });
+    for (let i = 0; i < n; i++) {
+      const f = n === 1 ? 0.5 : i / (n - 1);
+      g.circle(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, 5)
+        .fill({ color: 0x8ad06a, alpha: 0.35 })
+        .stroke({ width: 1.5, color: 0xbdf0a8, alpha: 0.9 });
+    }
+  }
+
+  private sendLineOrder(cx: number, cy: number): void {
+    const ids = this.selectedUnits();
+    if (ids.length === 0) return;
+    const a = this.r.screenToWorld(this.rStartX, this.rStartY);
+    const b = this.r.screenToWorld(cx, cy);
+    this.net.send({ t: 'move', unitIds: ids, x: a.x, y: a.y, lineTo: { x: b.x, y: b.y }, queue: this.shift });
+    sound.play('move', { pan: panAt(cx) });
+    this.r.entities.ping((a.x + b.x) / 2, (a.y + b.y) / 2, this.shift ? 0xffd24a : 0x8ad06a);
   }
 
   // --- selection ------------------------------------------------------------
@@ -280,6 +464,33 @@ export class Input {
     if (hit && hit.view.owner === this.state.playerId) {
       this.state.selection.add(hit.view.id);
       sound.play('select', { pan: panAt(cx) });
+      // Double-click: grab every own entity of the same kind currently on screen.
+      const now = performance.now();
+      if (this.lastClickId === hit.view.id && now - this.lastClickAt < DOUBLE_CLICK_MS) {
+        this.selectAllOfKindOnScreen(hit.view.kind);
+        this.lastClickId = null;
+        return;
+      }
+      this.lastClickId = hit.view.id;
+      this.lastClickAt = now;
+    } else {
+      this.lastClickId = null;
+    }
+  }
+
+  // Select all own entities of a kind whose position is inside the viewport.
+  private selectAllOfKindOnScreen(kind: EntityKind): void {
+    let added = 0;
+    for (const [id, e] of this.state.entities) {
+      if (e.view.owner !== this.state.playerId || e.view.kind !== kind) continue;
+      const sp = this.r.worldToScreen(e.view.x, e.view.y);
+      if (sp.x < 0 || sp.y < 0 || sp.x > this.r.screenWidth || sp.y > this.r.screenHeight) continue;
+      if (!this.state.selection.has(id)) added++;
+      this.state.selection.add(id);
+    }
+    if (added > 0) {
+      sound.play('select');
+      this.showToast(`selected ${this.state.selection.size} ${LABEL[kind] ?? kind}`);
     }
   }
 
@@ -426,6 +637,8 @@ export class Input {
 
   cancelPlacement(): void {
     this.pendingBuild = null;
+    this.wallDragStart = null;
+    this.wallDragEnd = null;
     this.ghost.visible = false;
     this.ghostLabel.visible = false;
     this.refreshPanel(true);
@@ -501,8 +714,54 @@ export class Input {
     return true;
   }
 
-  private placementValid(tileX: number, tileY: number, kind: EntityKind): boolean {
+  // Build-blocked tiles the client can see: impassable terrain plus the
+  // footprints (and courtyard rings) of visible buildings and resource nodes.
+  // Mirrors the server's canBuildTile well enough for ghost feedback and for
+  // filtering a dragged wall run before sending it (the server re-validates).
+  private occupiedTiles(): Set<number> {
+    const occ = new Set<number>();
+    const mt = this.state.mapTiles;
+    for (const e of this.state.entities.values()) {
+      const v = e.view;
+      let f = 0;
+      let outline = 0;
+      if (isBuilding(v.kind)) {
+        f = BUILDING_STATS[v.kind].footprint;
+        outline = BUILDING_STATS[v.kind].outline ?? 0;
+      } else if (RES_TYPE[v.kind]) {
+        f = 1;
+      } else {
+        continue;
+      }
+      const tx0 = Math.round(v.x / TILE - f / 2);
+      const ty0 = Math.round(v.y / TILE - f / 2);
+      for (let dy = -outline; dy < f + outline; dy++)
+        for (let dx = -outline; dx < f + outline; dx++)
+          occ.add((ty0 + dy) * mt + (tx0 + dx));
+    }
+    return occ;
+  }
+
+  private footprintOpen(tileX: number, tileY: number, f: number, occ: Set<number>): boolean {
+    const mt = this.state.mapTiles;
+    const terr = this.state.terrain;
+    for (let dy = 0; dy < f; dy++)
+      for (let dx = 0; dx < f; dx++) {
+        const tx = tileX + dx;
+        const ty = tileY + dy;
+        if (tx < 0 || ty < 0 || tx >= mt || ty >= mt) return false;
+        const i = ty * mt + tx;
+        if (occ.has(i)) return false;
+        const t = terr ? terr[i] : 0;
+        if (t === 1 || t === 3) return false; // water / mountain
+      }
+    return true;
+  }
+
+  private placementValid(tileX: number, tileY: number, kind: EntityKind, occ?: Set<number>): boolean {
     const f = BUILDING_STATS[kind].footprint;
+    // Occupied ground (visible buildings/resources, water, mountains).
+    if (occ && !this.footprintOpen(tileX, tileY, f, occ)) return false;
     // You may only build on explored, currently-visible ground (no fog).
     if (!this.footprintVisible(tileX, tileY, f)) return false;
     // Never inside enemy territory.
@@ -514,10 +773,81 @@ export class Input {
     return footprintInTerritory(sources, tileX, tileY, f);
   }
 
+  // Integer Bresenham between two tiles — the run of wall a drag lays down.
+  private lineTiles(a: { tileX: number; tileY: number }, b: { tileX: number; tileY: number }): Array<{ tileX: number; tileY: number }> {
+    const out: Array<{ tileX: number; tileY: number }> = [];
+    let x = a.tileX, y = a.tileY;
+    const dx = Math.abs(b.tileX - x), dy = Math.abs(b.tileY - y);
+    const sx = x < b.tileX ? 1 : -1, sy = y < b.tileY ? 1 : -1;
+    let err = dx - dy;
+    for (;;) {
+      out.push({ tileX: x, tileY: y });
+      if (x === b.tileX && y === b.tileY) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
+    }
+    return out;
+  }
+
+  // Lay the dragged run of wall: one build intent per valid tile, truncated to
+  // what the stockpile can afford (the server still re-validates each).
+  private placeWallLine(cx: number, cy: number): void {
+    if (!this.wallDragStart) return;
+    const end = this.ghostTile(cx, cy);
+    const tiles = this.lineTiles(this.wallDragStart, { tileX: end.tileX, tileY: end.tileY });
+    const cost = BUILDING_STATS.wall.cost;
+    const affordable = Math.floor(Math.min(
+      cost.stone ? this.state.stockpile.stone / cost.stone : Infinity,
+      cost.wood ? this.state.stockpile.wood / cost.wood : Infinity,
+      cost.gold ? this.state.stockpile.gold / cost.gold : Infinity,
+      cost.food ? this.state.stockpile.food / cost.food : Infinity,
+    ));
+    const occ = this.occupiedTiles();
+    let placed = 0;
+    for (const t of tiles) {
+      if (placed >= affordable) break;
+      if (!this.placementValid(t.tileX, t.tileY, 'wall', occ)) continue;
+      this.net.send({ t: 'build', kind: 'wall', tileX: t.tileX, tileY: t.tileY });
+      placed++;
+    }
+    if (placed > 0) {
+      sound.play('place', { pan: panAt(cx) });
+      this.showToast(`laying ${placed} wall segment${placed === 1 ? '' : 's'}`);
+    } else {
+      sound.play('error', { pan: panAt(cx) });
+    }
+  }
+
   private updateGhost(cx: number, cy: number): void {
     if (!this.pendingBuild) return;
+
+    // Wall drag: preview the whole run, each segment tinted by its validity.
+    if (this.pendingBuild === 'wall' && this.wallDragStart) {
+      const end = this.ghostTile(cx, cy);
+      this.wallDragEnd = { tileX: end.tileX, tileY: end.tileY };
+      const tiles = this.lineTiles(this.wallDragStart, this.wallDragEnd);
+      this.ghost.clear();
+      const occ = this.occupiedTiles();
+      let okCount = 0;
+      for (const t of tiles) {
+        const ok = this.placementValid(t.tileX, t.tileY, 'wall', occ);
+        if (ok) okCount++;
+        this.ghost.rect(t.tileX * TILE, t.tileY * TILE, TILE, TILE)
+          .fill({ color: ok ? 0x6ad06a : 0xd06a6a, alpha: 0.35 })
+          .stroke({ width: 1.5, color: ok ? 0x9af09a : 0xf09a9a });
+      }
+      this.ghost.visible = true;
+      const cost = BUILDING_STATS.wall.cost;
+      this.ghostLabel.text = `${okCount} × ${costStr(cost)}`;
+      this.ghostLabel.x = (this.wallDragEnd.tileX + 0.5) * TILE;
+      this.ghostLabel.y = this.wallDragEnd.tileY * TILE - 6;
+      this.ghostLabel.visible = true;
+      return;
+    }
+
     const { tileX, tileY, f } = this.ghostTile(cx, cy);
-    const ok = this.placementValid(tileX, tileY, this.pendingBuild);
+    const ok = this.placementValid(tileX, tileY, this.pendingBuild, this.occupiedTiles());
     const cx2 = (tileX + f / 2) * TILE;
     const cy2 = (tileY + f / 2) * TILE;
     this.ghost.clear();
@@ -578,7 +908,7 @@ export class Input {
   private placeBuilding(cx: number, cy: number): void {
     if (!this.pendingBuild) return;
     const { tileX, tileY, f } = this.ghostTile(cx, cy);
-    const valid = this.placementValid(tileX, tileY, this.pendingBuild);
+    const valid = this.placementValid(tileX, tileY, this.pendingBuild, this.occupiedTiles());
     this.net.send({ t: 'build', kind: this.pendingBuild, tileX, tileY });
     if (valid) {
       sound.play('place', { pan: panAt(cx) });
@@ -863,6 +1193,16 @@ export class Input {
         this.net.send({ t: 'farmReseed', buildingId: id, on: !cur });
       });
     }
+    // Gate mode buttons (locked / trade / open).
+    for (const btn of this.infoEl.querySelectorAll('.gate-mode')) {
+      const mode = (btn as HTMLElement).dataset.mode as 'locked' | 'trade' | 'open';
+      const meta = GATE_MODES.find((m) => m.id === mode)!;
+      this.setTip(btn as HTMLElement, meta.name, meta.desc);
+      btn.addEventListener('click', () => {
+        this.net.send({ t: 'gate', buildingId: id, mode });
+        sound.play('click');
+      });
+    }
     // Market buy/sell buttons (sell gives gold for the resource; buy spends gold).
     for (const btn of this.infoEl.querySelectorAll('.mk-buy')) {
       btn.addEventListener('click', () => {
@@ -1001,6 +1341,21 @@ export class Input {
           `<button id="ip-farm-toggle" class="ip-btn${on ? ' on' : ''}">` +
           `Auto-reseed: ${on ? 'ON' : 'OFF'}</button>`,
         );
+      }
+    }
+
+    // Gate: who may pass. Owners get the mode buttons; everyone else just sees
+    // the current state (it's physically observable).
+    if (v.kind === 'gate') {
+      const mode = v.gate ?? 'trade';
+      const meta = GATE_MODES.find((m) => m.id === mode);
+      if (owned) {
+        parts.push(`<div class="ip-label">Gate — who may pass</div>`);
+        for (const m of GATE_MODES) {
+          parts.push(`<button class="ip-btn gate-mode${mode === m.id ? ' on' : ''}" data-mode="${m.id}">${m.icon} ${m.name}</button>`);
+        }
+      } else if (meta) {
+        parts.push(`<div class="ip-row">${meta.icon} ${meta.name.toLowerCase()}</div>`);
       }
     }
 

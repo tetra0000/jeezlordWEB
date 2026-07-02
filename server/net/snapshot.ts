@@ -37,6 +37,7 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.territory !== b.territory ||
     a.name !== b.name ||
     a.farmAuto !== b.farmAuto ||
+    a.gate !== b.gate ||
     a.job !== b.job ||
     a.stance !== b.stance ||
     a.trade?.target !== b.trade?.target ||
@@ -215,8 +216,12 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     (shots ??= []).push({ kind: s.kind, x: s.x, y: s.y, tx: s.tx, ty: s.ty });
   }
 
+  // Caravan road wear worn in this tick. Public cosmetic ground state (like
+  // terrain) — every online player gets the same increments.
+  const roads = world.roadEvents.length > 0 ? [...world.roadEvents] : undefined;
+
   if (enter.length === 0 && update.length === 0 && leave.length === 0 &&
-      !you && !pop && !jobs && !market && defeated === undefined && !shots && !diplo)
+      !you && !pop && !jobs && !market && defeated === undefined && !shots && !diplo && !roads)
     return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
   if (dead.length) delta.dead = dead;
@@ -227,5 +232,6 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   if (defeated !== undefined) delta.defeated = defeated;
   if (shots) delta.shots = shots;
   if (diplo) delta.diplo = diplo;
+  if (roads) delta.roads = roads;
   return delta;
 }

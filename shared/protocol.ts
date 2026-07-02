@@ -6,6 +6,7 @@ import type {
   EntityKind,
   EntityView,
   Formation,
+  GateMode,
   JobReport,
   PlayerId,
   Pop,
@@ -59,6 +60,9 @@ export interface MoveMsg {
   // Group formation: the server spreads the units' destinations into this shape
   // around (x, y) instead of piling everyone onto the same point.
   formation?: Formation;
+  // Explicit line order (right-click-drag): the units form up evenly along the
+  // segment from (x, y) to this point. Overrides `formation` when present.
+  lineTo?: { x: number; y: number };
 }
 
 // Place a building (server validates cost, free tiles, ownership). Construction
@@ -116,6 +120,13 @@ export interface FarmReseedMsg {
   t: 'farmReseed';
   buildingId: EntityId;
   on: boolean;
+}
+
+// Set an owned gate's mode (who may path through it).
+export interface GateMsg {
+  t: 'gate';
+  buildingId: EntityId;
+  mode: GateMode;
 }
 
 // Diplomacy action toward another player:
@@ -199,6 +210,7 @@ export type ClientMsg =
   | RallyMsg
   | RenameMsg
   | FarmReseedMsg
+  | GateMsg
   | DiplomacyMsg
   | TradeMsg
   | StanceMsg
@@ -237,6 +249,10 @@ export interface InitMsg {
   // Static terrain grid, run-length encoded (see shared/terrain.ts). Decodes to
   // mapTiles*mapTiles bytes of terrain codes for client rendering + minimap.
   terrain: number[];
+  // Caravan road wear: every tile with a worn-in road, as [tileIndex, level]
+  // pairs (level 1..ROAD_LEVELS). Purely cosmetic ground state; increments
+  // arrive in the delta's `roads`.
+  roads?: Array<[number, number]>;
 }
 
 // Per-tick world delta. In v0 `enter`/`update`/`leave` cover all entities the
@@ -260,6 +276,9 @@ export interface DeltaMsg {
   // Your diplomacy roster (relation + pending offers with every other player).
   // Sent when it changes; the client diffs it for "X declared war!" toasts.
   diplo?: DiploEntry[];
+  // Caravan road-wear increments this tick: [tileIndex, newLevel] pairs.
+  // Cosmetic, public (like terrain) — fog still hides the ground visually.
+  roads?: Array<[number, number]>;
 }
 
 // Admin-mode state for the local player (whether the cheat panel is active, and

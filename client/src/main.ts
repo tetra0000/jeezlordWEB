@@ -170,6 +170,7 @@ async function boot(): Promise<void> {
         state.explored = loadExplored(curFogKey, msg.mapTiles * msg.mapTiles);
         savedExploredVersion = state.exploredVersion;
         centered = false;
+        state.applyRoads(msg.roads);
         renderer.setMap(msg.mapTiles, msg.tile, state.terrain);
         camera.centerOn(MAP_PX / 2, MAP_PX / 2);
         refreshDefeat(); // a fresh init (incl. after restart) clears defeat
@@ -273,6 +274,8 @@ async function boot(): Promise<void> {
     };
     renderer.entities.frame(state, dt, view);
     renderer.tiles.cull(view); // hide off-screen terrain chunks
+    renderer.roads.update(state); // no-op unless road wear changed
+    renderer.roads.cull(view, state.tile || TILE);
 
     // Fog + territory barely change frame-to-frame and each rebuild their
     // Graphics geometry over a full scan of the world, so refresh them at ~20 Hz

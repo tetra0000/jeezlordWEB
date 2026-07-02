@@ -1,7 +1,7 @@
 // The authoritative world: entity/component store, tile-occupancy grid, and
 // player registry. Sim systems mutate this; persistence flushes it; snapshots
 // read from it. In-RAM is the source of truth at runtime.
-import type { Action, EntityId, EntityKind, EntityView, PlayerId, ProjectileKind, Relation } from '../../shared/types.js';
+import type { Action, EntityId, EntityKind, EntityView, GateMode, PlayerId, ProjectileKind, Relation } from '../../shared/types.js';
 import { MAP_TILES, TILE, TERRAIN_WATER, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
 import {
   BASE_POP_CAP,
@@ -52,6 +52,10 @@ export class World {
   readonly tcName = new Map<EntityId, string>();
   // Farms' auto-reseed toggle (absent = default ON).
   readonly farmAuto = new Map<EntityId, boolean>();
+  // Gates' modes (absent = default 'trade') and which tile each gate occupies
+  // (tileIndex -> gate id, for per-mover passability checks in pathfinding).
+  readonly gateMode = new Map<EntityId, GateMode>();
+  readonly gateTiles = new Map<number, EntityId>();
   readonly combat = new Map<EntityId, CombatState>();
   readonly resourceAmount = new Map<EntityId, number>();
   // Caravans' trade routes (see systems/trade.ts).
@@ -104,6 +108,15 @@ export class World {
     }
     return out;
   }
+
+  // Caravan road wear per tile (0..1, sparse — absent = no wear). Purely
+  // cosmetic ground state, worn in by caravans on active trade routes.
+  // `dirtyRoads` marks tiles for the next DB flush; `roadEvents` collects this
+  // tick's quantised level increases for the outbound deltas (cleared by the
+  // trade system at the start of each tick, like combat clears `shots`).
+  readonly roadWear = new Map<number, number>();
+  readonly dirtyRoads = new Set<number>();
+  readonly roadEvents: Array<[number, number]> = [];
 
   // Resource nodes each player has discovered (entered vision once). Discovered
   // nodes stay visible through fog (AoE-style "explored" memory). In-memory only
@@ -166,6 +179,33 @@ export class World {
   terrainAt(tx: number, ty: number): number {
     if (!this.inBounds(tx, ty)) return TERRAIN_WATER;
     return this.terrain[this.tileIndex(tx, ty)];
+  }
+  // Whether a specific MOVER may pass this gate, per the gate's mode:
+  // locked = nobody; open = everyone; trade (default) = the owner, allies, and
+  // any caravan whose owner isn't at war with the gate's owner. A gate still
+  // under construction is a solid blocker for everyone (like a wall foundation).
+  gatePassable(gateId: EntityId, moverId: EntityId): boolean {
+    if (!this.isOperational(gateId)) return false;
+    const mode = this.gateMode.get(gateId) ?? 'trade';
+    if (mode === 'locked') return false;
+    if (mode === 'open') return true;
+    const gateOwner = this.owner.get(gateId);
+    const moverOwner = this.owner.get(moverId);
+    if (gateOwner == null || moverOwner == null) return false;
+    const rel = this.relationOf(gateOwner, moverOwner);
+    if (moverOwner === gateOwner || rel === 'ally') return true;
+    return this.kind.get(moverId) === 'caravan' && rel !== 'war';
+  }
+  // Mover-aware passability: like isBlockedTile, but a tile blocked only by a
+  // gate is passable when that gate lets THIS mover through. Pathfinding uses
+  // this; placement/anonymous checks keep using isBlockedTile (a gate tile is
+  // always occupied ground for building purposes).
+  isBlockedTileFor(tx: number, ty: number, moverId: EntityId): boolean {
+    if (!this.isBlockedTile(tx, ty)) return false;
+    const gate = this.gateTiles.get(this.tileIndex(tx, ty));
+    if (gate == null) return true;
+    // Gates have a 1-tile footprint, so the gate is this tile's only blocker.
+    return !this.gatePassable(gate, moverId);
   }
   // Can a building be placed on this tile? False if it's impassable terrain, a
   // movement blocker, OR a no-build reservation (a walkable building / military
@@ -263,6 +303,7 @@ export class World {
     this.tcRadius.delete(id);
     this.tcName.delete(id);
     this.farmAuto.delete(id);
+    this.gateMode.delete(id);
     this.combat.delete(id);
     this.resourceAmount.delete(id);
     this.trader.delete(id);
@@ -322,6 +363,9 @@ export class World {
     }
     // Farm auto-reseed state (shown on the owner's info panel).
     if (kind === 'farm') v.farmAuto = this.farmAuto.get(id) ?? true;
+
+    // Gate mode (public — passers-by can see whether it's open).
+    if (kind === 'gate') v.gate = this.gateMode.get(id) ?? 'trade';
 
     // Villager job (shown on the owner's info panel / tooltip).
     if (kind === 'villager') {

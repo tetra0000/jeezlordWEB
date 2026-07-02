@@ -48,6 +48,34 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
   the route; manual move/stop orders cancel it. Persisted in `ent_trade`.
   Client: right-click a market with caravans selected.
 
+## Walls, gates & roads (v12)
+
+- **Walls are drag-buildable** (client-side: pointer-down anchors, Bresenham run
+  of 1-tile builds on release, filtered by an occupancy-aware `placementValid`).
+- **Gates** are wall segments with a mode (`GateMode`: `locked` | `trade` |
+  `open`, default trade = owner + allies + non-enemy caravans pass).
+  Pathfinding is mover-aware: `world.isBlockedTileFor(tx, ty, moverId)` consults
+  `World.gateTiles`/`gateMode` (+`gatePassable`); `findPath` takes the mover id.
+  `gate` intent sets the mode (owner-only); mode is public on the wire
+  (`EntityView.gate`); persisted in `ent_building_meta.gate_mode`. The client
+  swaps `gate`/`gate_open` textures and shows mode buttons in the info panel.
+- **Caravan roads:** caravans on active routes wear their tile (`trade.ts`
+  `wearRoad`, `ROAD_WEAR_PER_S`, cap 1). `World.roadWear` (sparse), persisted in
+  `road_wear`; full snapshot in `init.roads`, quantised increments
+  (`ROAD_LEVELS`) in `delta.roads` (public, like terrain). Client renders them
+  in `render/roads.ts` (alpha ∝ level). Purely cosmetic.
+
+## Commanding & selection QoL (v12, all client-side except line moves)
+
+- **Right-click-HOLD + drag** = line order: `MoveMsg.lineTo`; the server spreads
+  the units evenly along the segment (`lineTargets` in dispatch.ts).
+- **Double-click** an own entity selects all of that kind on screen.
+- **Ctrl+digit** stores a control group; digit recalls; double-tap centres.
+- **`.` / `,`** cycle idle civilians (villagers/caravans) / idle military.
+- **Overhead icons:** every unit draws a 16px badge above its head
+  (`icon_<kind>` / villagers `icon_job_<job>` — job is owner-only on the wire,
+  enemies see the generic villager badge).
+
 ## Architecture (the load-bearing ideas)
 
 - **The server is authoritative.** Clients send *intents* (`shared/protocol.ts`);
@@ -149,12 +177,17 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 
 ## Sprites, animation & tooltip (client)
 
-- Art is **generated placeholder PNGs** in `client/assets/` (one per entity kind,
-  plus `tile_grass.png` and `fx_*.png`), written by `scripts/gen-assets.mjs`
-  (`npm run gen:assets`, uses `pngjs`). They're committed so deploys don't need
-  the generator. Units/buildings are greyscale and **tinted by owner colour** on
-  the client (team colour); resources/tiles/effects keep their own colours.
-  Replace a PNG to reskin — filenames (= kind) are the contract.
+- Art is **generated PNGs** in `client/assets/` (one per entity kind, plus
+  tiles, `fx_*`, `icon_*`, `decor_*`), written by `scripts/gen-assets.mjs`
+  (`npm run gen:assets`, uses `pngjs`). Committed so deploys don't need the
+  generator. Since v12 base sprites carry their **own colours** (no whole-sprite
+  tint); ownership shows via a **`team_<kind>.png` overlay** (white flags/
+  tabards/trim, drawn by `pair()` on the same canvas so they align) that the
+  client tints with the owner colour — a child sprite per figure in
+  `render/entities.ts`. Filenames are the contract. `tile_forestground.png` has
+  no generator (don't add one); `logo.png` is hand-made.
+- Grass gets a deterministic scatter of `decor_*` props per tile chunk
+  (`render/tiles.ts`) so open ground isn't bare.
 - `render/assets.ts` loads them into `tex[kind]`; `render/entities.ts` draws a
   `Sprite` per entity and animates it **procedurally** from `EntityView.action`
   (chop/mine/pick/hammer/lunge/walk) with short-lived `fx_*` particles. No
@@ -230,7 +263,8 @@ gather/farm rates, costs, vision). Adjust pacing there, never in system code.
   `TIME_SCALE=30`) server.
 - In-process tests (no server; run against `dist/`): `test-squads.mjs`,
   `test-stances.mjs`, `test-diplomacy.mjs`, `test-caravan.mjs`,
-  `test-heal.mjs`, `test-worldgen.mjs`.
+  `test-heal.mjs`, `test-worldgen.mjs`, `test-gates.mjs` (gates, road wear,
+  line orders).
 - `node scripts/render-map.mjs out.png` — generate + render a world to PNG
   (eyeball rivers/bridges/mountains). `node scripts/dev-sprite-sheet.mjs out.png`
   — contact sheet of all sprites.

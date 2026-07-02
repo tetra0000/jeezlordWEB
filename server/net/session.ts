@@ -6,7 +6,7 @@ import { encode, type ServerMsg } from '../../shared/protocol.js';
 import type { EntityId, EntityView, PlayerId, Pop, Stockpile } from '../../shared/types.js';
 import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_DIRT, TERRAIN_FLOWERS } from '../../shared/constants.js';
 import { encodeTerrainRLE } from '../../shared/terrain.js';
-import { BUILDING_STATS } from '../../shared/stats.js';
+import { BUILDING_STATS, ROAD_LEVELS } from '../../shared/stats.js';
 import type { Db } from '../db/db.js';
 import type { World } from '../sim/world.js';
 import type { GameLoop } from '../sim/loop.js';
@@ -217,6 +217,12 @@ function bind(ctx: GameContext, session: Session, userId: number, token: string)
 function sendInit(ctx: GameContext, session: Session, playerId: PlayerId): void {
   const p = ctx.world.players.get(playerId)!;
   const pop: Pop = { used: ctx.world.popUsed(playerId), cap: ctx.world.popCap(playerId) };
+  // Full caravan-road-wear snapshot (quantised); increments then arrive in deltas.
+  const roads: Array<[number, number]> = [];
+  for (const [tile, wear] of ctx.world.roadWear) {
+    const lvl = Math.round(wear * ROAD_LEVELS);
+    if (lvl > 0) roads.push([tile, lvl]);
+  }
   session.send({
     t: 'init',
     playerId,
@@ -225,6 +231,7 @@ function sendInit(ctx: GameContext, session: Session, playerId: PlayerId): void 
     stockpile: { ...p.stockpile },
     pop,
     terrain: encodeTerrainRLE(ctx.world.terrain),
+    roads: roads.length > 0 ? roads : undefined,
   });
   session.lastSent.clear();
   session.lastStockpile = { ...p.stockpile };

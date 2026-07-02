@@ -4,6 +4,7 @@
 // persistent; setMap only rebuilds the tile contents.
 import { Application, Container, Graphics } from 'pixi.js';
 import { TileLayer } from './tiles.js';
+import { RoadLayer } from './roads.js';
 import { EntityLayer } from './entities.js';
 import { TerritoryLayer } from './territory.js';
 import { Fog } from './fog.js';
@@ -12,6 +13,7 @@ export class GameRenderer {
   readonly app = new Application();
   readonly world = new Container(); // camera: position + scale applied here
   readonly tiles = new TileLayer();
+  readonly roads = new RoadLayer();
   readonly territory = new TerritoryLayer();
   readonly entities = new EntityLayer();
   readonly fog = new Fog();
@@ -21,8 +23,9 @@ export class GameRenderer {
     await this.app.init({ resizeTo: window, background: 0x101410, antialias: true });
     document.body.appendChild(this.app.canvas);
     this.app.stage.addChild(this.world);
-    // z-order: tiles < territory < entities < fog.
+    // z-order: tiles < roads < territory < entities < fog.
     this.world.addChild(this.tiles.container);
+    this.world.addChild(this.roads.container);
     this.world.addChild(this.territory.container);
     this.world.addChild(this.entities.container);
     this.world.addChild(this.fog.container);

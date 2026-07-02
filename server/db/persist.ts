@@ -26,8 +26,9 @@ export function flush(db: Db, world: World): void {
   const upTrain = h.prepare(`INSERT OR REPLACE INTO ent_train (entity_id, queue_json) VALUES (?, ?)`);
   const upRally = h.prepare(`INSERT OR REPLACE INTO ent_rally (entity_id, x, y) VALUES (?, ?, ?)`);
   const upMeta = h.prepare(
-    `INSERT OR REPLACE INTO ent_building_meta (entity_id, name, radius, farm_auto) VALUES (?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO ent_building_meta (entity_id, name, radius, farm_auto, gate_mode) VALUES (?, ?, ?, ?, ?)`,
   );
+  const upRoad = h.prepare(`INSERT OR REPLACE INTO road_wear (tile, wear) VALUES (?, ?)`);
   const upResource = h.prepare(`INSERT OR REPLACE INTO resource_nodes (entity_id, amount) VALUES (?, ?)`);
   const upStance = h.prepare(`INSERT OR REPLACE INTO ent_stance (entity_id, stance) VALUES (?, ?)`);
   const upTrade = h.prepare(`INSERT OR REPLACE INTO ent_trade (entity_id, state, home_id, target_id) VALUES (?, ?, ?, ?)`);
@@ -91,11 +92,14 @@ export function flush(db: Db, world: World): void {
       if (rp) upRally.run(id, rp.x, rp.y);
       else delRally.run(id);
 
-      // Town-center name/radius and farm reseed flag (one row per such building).
+      // Town-center name/radius, farm reseed flag, gate mode (one row per such
+      // building).
       if (kind === 'townCenter') {
-        upMeta.run(id, world.tcName.get(id) ?? null, world.tcRadius.get(id) ?? null, null);
+        upMeta.run(id, world.tcName.get(id) ?? null, world.tcRadius.get(id) ?? null, null, null);
       } else if (kind === 'farm') {
-        upMeta.run(id, null, null, (world.farmAuto.get(id) ?? true) ? 1 : 0);
+        upMeta.run(id, null, null, (world.farmAuto.get(id) ?? true) ? 1 : 0, null);
+      } else if (kind === 'gate') {
+        upMeta.run(id, null, null, null, world.gateMode.get(id) ?? 'trade');
       } else {
         delMeta.run(id);
       }
@@ -141,6 +145,12 @@ export function flush(db: Db, world: World): void {
       world.diploDirty = false;
     }
 
+    // Caravan road wear: only tiles worn since the last flush.
+    for (const tile of world.dirtyRoads) {
+      const w = world.roadWear.get(tile);
+      if (w != null) upRoad.run(tile, w);
+    }
+
     db.setMeta('next_entity_id', String(world.peekNextId()));
     // Global market price multipliers (small, drift continuously — write each flush).
     db.setMeta('market_wood', String(world.market.wood));
@@ -155,4 +165,5 @@ export function flush(db: Db, world: World): void {
   world.dirtyEntities.clear();
   world.removedEntities.clear();
   world.dirtyPlayers.clear();
+  world.dirtyRoads.clear();
 }

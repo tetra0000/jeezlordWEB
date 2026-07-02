@@ -45,6 +45,7 @@ export function killEntity(world: World, id: EntityId): void {
     const tileX = Math.round(tf.x / TILE - f / 2);
     const tileY = Math.round(tf.y / TILE - f / 2);
     applyBuildingFootprint(world, kind, tileX, tileY, -1);
+    if (kind === 'gate') world.gateTiles.delete(world.tileIndex(tileX, tileY));
   }
   world.remove(id);
 }

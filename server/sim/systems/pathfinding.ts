@@ -69,10 +69,14 @@ function octile(ax: number, ay: number, bx: number, by: number): number {
 // Find the nearest non-blocked tile to (gx,gy) within a few rings. Orthogonal
 // neighbours are preferred over diagonals so a unit ends up directly beside a
 // blocked goal (e.g. a resource tile) rather than at a corner one tile away.
-function nearestFree(world: World, gx: number, gy: number): { x: number; y: number } | null {
-  if (!world.isBlockedTile(gx, gy)) return { x: gx, y: gy };
+function nearestFree(
+  blocked: (tx: number, ty: number) => boolean,
+  gx: number,
+  gy: number,
+): { x: number; y: number } | null {
+  if (!blocked(gx, gy)) return { x: gx, y: gy };
   for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
-    if (!world.isBlockedTile(gx + dx, gy + dy)) return { x: gx + dx, y: gy + dy };
+    if (!blocked(gx + dx, gy + dy)) return { x: gx + dx, y: gy + dy };
   }
   for (let r = 1; r <= MAX_GOAL_SEARCH; r++) {
     for (let dy = -r; dy <= r; dy++) {
@@ -80,7 +84,7 @@ function nearestFree(world: World, gx: number, gy: number): { x: number; y: numb
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const tx = gx + dx;
         const ty = gy + dy;
-        if (!world.isBlockedTile(tx, ty)) return { x: tx, y: ty };
+        if (!blocked(tx, ty)) return { x: tx, y: ty };
       }
     }
   }
@@ -101,13 +105,19 @@ export function findPath(
   syPx: number,
   gxPx: number,
   gyPx: number,
+  moverId?: number,
 ): PathResult | null {
+  // Mover-aware passability: gates open selectively (per owner/relation/kind),
+  // so the same tile can be a wall for one unit and a doorway for another.
+  const blocked = moverId != null
+    ? (tx: number, ty: number): boolean => world.isBlockedTileFor(tx, ty, moverId)
+    : (tx: number, ty: number): boolean => world.isBlockedTile(tx, ty);
   const sx = toTile(sxPx);
   const sy = toTile(syPx);
   let gx = toTile(gxPx);
   let gy = toTile(gyPx);
 
-  const goal = nearestFree(world, gx, gy);
+  const goal = nearestFree(blocked, gx, gy);
   if (!goal) return null;
   gx = goal.x;
   gy = goal.y;
@@ -154,10 +164,10 @@ export function findPath(
         if (dx === 0 && dy === 0) continue;
         const nx = cx + dx;
         const ny = cy + dy;
-        if (world.isBlockedTile(nx, ny)) continue;
+        if (blocked(nx, ny)) continue;
         // No corner cutting: a diagonal step requires both orthogonal tiles free.
         if (dx !== 0 && dy !== 0) {
-          if (world.isBlockedTile(cx + dx, cy) || world.isBlockedTile(cx, cy + dy)) continue;
+          if (blocked(cx + dx, cy) || blocked(cx, cy + dy)) continue;
         }
         const ni = ny * MAP_TILES + nx;
         if (closed.has(ni)) continue;
@@ -196,7 +206,7 @@ export function findPath(
     // Use the exact clicked point as the final waypoint when we actually reached
     // the goal and its tile was free (smoother off-grid arrival). Partial paths
     // end on a tile centre, not the unreachable click point.
-    if (reachedGoal && !world.isBlockedTile(toTile(gxPx), toTile(gyPx))) {
+    if (reachedGoal && !blocked(toTile(gxPx), toTile(gyPx))) {
       pts[pts.length - 1] = { x: gxPx, y: gyPx };
     }
     return simplify(pts);
@@ -231,7 +241,7 @@ export function pathfindingSystem(world: World): void {
     const tf = world.transform.get(id);
     if (!tf) continue;
     budget--;
-    const result = findPath(world, tf.x, tf.y, mv.target.x, mv.target.y);
+    const result = findPath(world, tf.x, tf.y, mv.target.x, mv.target.y, id);
     if (result && result.path.length > 0) {
       mv.path = result.path;
       mv.pathIndex = 0;

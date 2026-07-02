@@ -15,10 +15,10 @@ import {
   maxHpOf,
   speedOf,
 } from '../../shared/stats.js';
-import type { EntityKind, ResourceType, Stance, VillagerJob } from '../../shared/types.js';
+import type { EntityKind, GateMode, ResourceType, Stance, VillagerJob } from '../../shared/types.js';
 import type { Db } from './db.js';
 import { World } from '../sim/world.js';
-import { applyBuildingFootprint } from '../sim/spawn.js';
+import { applyBuildingFootprint, registerGate } from '../sim/spawn.js';
 import type { TrainItem } from '../sim/components.js';
 
 // Pre-squads unit kinds that may still exist in an older database, mapped to
@@ -70,8 +70,8 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT entity_id, x, y FROM ent_rally').all() as Array<{ entity_id: number; x: number; y: number }>)
     rallyById.set(r.entity_id, { x: r.x, y: r.y });
 
-  const metaById = new Map<number, { name: string | null; radius: number | null; farm_auto: number | null }>();
-  for (const m of h.prepare('SELECT entity_id, name, radius, farm_auto FROM ent_building_meta').all() as Array<{ entity_id: number; name: string | null; radius: number | null; farm_auto: number | null }>)
+  const metaById = new Map<number, { name: string | null; radius: number | null; farm_auto: number | null; gate_mode: string | null }>();
+  for (const m of h.prepare('SELECT entity_id, name, radius, farm_auto, gate_mode FROM ent_building_meta').all() as Array<{ entity_id: number; name: string | null; radius: number | null; farm_auto: number | null; gate_mode: string | null }>)
     metaById.set(m.entity_id, m);
 
   const resourceById = new Map<number, number>();
@@ -155,6 +155,9 @@ export function loadWorld(db: Db, world: World): void {
         if (meta?.name) world.tcName.set(id, meta.name);
       } else if (kind === 'farm') {
         world.farmAuto.set(id, meta ? meta.farm_auto !== 0 : true);
+      } else if (kind === 'gate') {
+        world.gateMode.set(id, (meta?.gate_mode as GateMode) ?? 'trade');
+        registerGate(world, id, tileX, tileY);
       }
     } else if (isResourceNode(kind)) {
       const tx = Math.floor(x / TILE);
@@ -173,6 +176,10 @@ export function loadWorld(db: Db, world: World): void {
       });
     }
   }
+
+  // Caravan road wear (cosmetic ground state).
+  for (const r of h.prepare('SELECT tile, wear FROM road_wear').all() as Array<{ tile: number; wear: number }>)
+    world.roadWear.set(r.tile, r.wear);
 
   // Diplomacy relations + pending proposals.
   for (const d of h.prepare('SELECT a, b, state, proposer FROM diplomacy').all() as Array<{ a: number; b: number; state: string; proposer: number | null }>) {

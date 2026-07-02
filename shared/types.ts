@@ -28,6 +28,9 @@ export type EntityKind =
   // earns gold on every delivery home (see server/sim/systems/trade.ts).
   | 'caravan'
   | 'wall'
+  // A gate: a wall segment that can let traffic through. Its mode (locked /
+  // open for trade / always open) decides who may path through its tile.
+  | 'gate'
   | 'tower'
   | 'townCenter'
   | 'house'
@@ -61,6 +64,12 @@ export type Stance = 'aggressive' | 'defensive' | 'standGround' | 'noAttack';
 // Group movement formations (how a multi-squad move order arranges its
 // destinations): a wide line abreast, a compact box, or a loose spread.
 export type Formation = 'line' | 'box' | 'loose';
+
+// Gate behaviour (who may path through the gate's tile):
+//  - locked: nobody passes, the gate acts as a solid wall.
+//  - trade: the owner, allies, and any non-enemy CARAVAN pass (default).
+//  - open: everyone passes, even enemies.
+export type GateMode = 'locked' | 'trade' | 'open';
 
 // Diplomacy. Every pair of players has a relation; everyone starts NEUTRAL
 // (units never auto-engage and cannot be ordered to attack). WAR is declared
@@ -145,6 +154,7 @@ export interface EntityView {
   territory?: number; // town centers: current territory radius in tiles
   name?: string; // town centers: player-given name
   farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
+  gate?: GateMode; // gates: current mode (public — it's physically observable)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
   stance?: Stance; // military squads: current stance (sent to the owner only)
   // Caravans: the active trade route (market entity ids) and the gold earned

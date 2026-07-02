@@ -109,7 +109,14 @@ export function spawnBuilding(
     world.tcName.set(id, randomTownName(used));
   }
   if (kind === 'farm') world.resourceAmount.set(id, FARM_FOOD);
+  if (kind === 'gate') registerGate(world, id, tileX, tileY);
   return id;
+}
+
+// Register a gate's tile in the per-mover passability map (gates have a 1-tile
+// footprint). Used by spawnBuilding and the DB loader; killEntity unregisters.
+export function registerGate(world: World, id: EntityId, tileX: number, tileY: number): void {
+  world.gateTiles.set(world.tileIndex(tileX, tileY), id);
 }
 
 // Drop a corpse where a unit died. Neutral (owner = null) so it never blocks

@@ -8,7 +8,7 @@
 // adopts the route; if the target dies (or war breaks out with its owner) the
 // caravan goes idle where it stands and waits for new orders.
 import { TILE } from '../../../shared/constants.js';
-import { CARAVAN_MIN_OWN_TRADE_TILES, caravanGold } from '../../../shared/stats.js';
+import { CARAVAN_MIN_OWN_TRADE_TILES, ROAD_LEVELS, ROAD_WEAR_PER_S, caravanGold } from '../../../shared/stats.js';
 import type { EntityId, PlayerId } from '../../../shared/types.js';
 import type { Trader } from '../components.js';
 import type { World } from '../world.js';
@@ -44,12 +44,33 @@ function stopTrading(world: World, id: EntityId, tr: Trader): void {
   world.markDirty(id);
 }
 
-export function tradeSystem(world: World, _dt: number): void {
+// Wear the ground under a working caravan into road (cosmetic). Wear accrues
+// per sim-second, caps at 1, and emits a quantised road event when its wire
+// level ticks up (the snapshot layer forwards those to every client).
+function wearRoad(world: World, tf: { x: number; y: number }, dt: number): void {
+  const tx = Math.floor(tf.x / TILE);
+  const ty = Math.floor(tf.y / TILE);
+  if (!world.inBounds(tx, ty)) return;
+  const i = world.tileIndex(tx, ty);
+  const before = world.roadWear.get(i) ?? 0;
+  if (before >= 1) return;
+  const after = Math.min(1, before + ROAD_WEAR_PER_S * dt);
+  world.roadWear.set(i, after);
+  world.dirtyRoads.add(i);
+  const lvlBefore = Math.round(before * ROAD_LEVELS);
+  const lvlAfter = Math.round(after * ROAD_LEVELS);
+  if (lvlAfter > lvlBefore) world.roadEvents.push([i, lvlAfter]);
+}
+
+export function tradeSystem(world: World, dt: number): void {
+  // Last tick's road events have been broadcast; this tick starts fresh.
+  world.roadEvents.length = 0;
   for (const [id, tr] of world.trader) {
     if (tr.state === 'idle') continue;
     const owner = world.owner.get(id);
     const tf = world.transform.get(id);
     if (owner == null || !tf) continue;
+    wearRoad(world, tf, dt);
 
     // Validate the route's endpoints every tick (markets can be razed).
     if (!isLiveMarket(world, tr.homeId)) {

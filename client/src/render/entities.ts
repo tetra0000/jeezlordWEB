@@ -29,6 +29,10 @@ interface Sprite_ {
   figures: Sprite[];
   figureOffs: Array<{ x: number; y: number }>;
   menShown: number; // last drawn surviving-men count (-1 = not a squad)
+  // Overhead badge (unit type / villager job) so units read at a glance.
+  icon?: Sprite;
+  iconKey: string; // last texture key drawn ('' = none)
+  gateOpenShown?: boolean; // gates: last drawn open/closed texture state
   // Overlay graphics are created lazily and skipped entirely for resource nodes
   // (the bulk of the world): they're never selected, damaged, or built/trained,
   // so they need none of these — saving 4 Graphics per node under admin reveal.
@@ -323,6 +327,10 @@ export class EntityLayer {
     const squad = !isCorpse && !resource && !isBuilding(kind) ? (UNIT_STATS[kind]?.squad ?? 1) : 1;
     const figures: Sprite[] = [];
     const figureOffs = squad > 1 ? SQUAD_OFFSETS[squad] ?? [] : [{ x: 0, y: 0 }];
+    // Sprites carry their own colours; ownership shows through a team-colour
+    // OVERLAY (flags/tabards/trim in team_<kind>.png) tinted by owner — not a
+    // whole-sprite hue shift.
+    const teamTex = !isCorpse && e.view.owner != null ? tex['team_' + texKind] : undefined;
     for (let i = 0; i < Math.max(1, squad); i++) {
       const fig = new Sprite(tex[texKind]);
       fig.anchor.set(0.5, 0.5);
@@ -334,13 +342,28 @@ export class EntityLayer {
       if (isCorpse) {
         fig.tint = corpseTint(e.view.corpse?.team ?? null);
         fig.rotation = Math.PI / 2; // lying down
-      } else if (isBuilding(kind) || !resource) {
-        fig.tint = ownerColor(e.view.owner);
+      } else if (teamTex) {
+        // Overlay is a child of the figure so it inherits scale + animation.
+        const overlay = new Sprite(teamTex);
+        overlay.anchor.set(0.5, 0.5);
+        overlay.tint = ownerColor(e.view.owner);
+        fig.addChild(overlay);
       }
       node.addChild(fig);
       figures.push(fig);
     }
     const body = figures[0];
+
+    // Overhead badge: unit type at a glance (villagers show their job — the
+    // texture is swapped in frame() as the job changes).
+    let icon: Sprite | undefined;
+    if (!isCorpse && !resource && !isBuilding(kind)) {
+      icon = new Sprite();
+      icon.anchor.set(0.5, 1);
+      icon.y = -half - 10;
+      icon.visible = false;
+      node.addChild(icon);
+    }
 
     let ring: Graphics | undefined;
     let hpBg: Graphics | undefined;
@@ -378,6 +401,7 @@ export class EntityLayer {
     this.container.addChild(node);
     const s: Sprite_ = {
       node, body, figures, figureOffs, menShown: squad > 1 ? squad : -1,
+      icon, iconKey: '',
       ring, hpBg, hpFg, prog, label, half,
       phase: (id * 1.7) % 6.283, fxTimer: 0, hpShown: false, hpRatio: -1, progKey: '',
     };
@@ -573,6 +597,31 @@ export class EntityLayer {
 
       const building = e.view.build;
       s.node.alpha = building != null ? 0.45 + 0.45 * building : 1;
+
+      // Overhead badge: unit type, or the villager's current job. Only the
+      // owner receives `job`, so enemy villagers show the generic badge.
+      if (s.icon) {
+        const key = v.kind === 'villager' && v.job ? 'icon_job_' + v.job : 'icon_' + v.kind;
+        if (key !== s.iconKey) {
+          const t = tex[key];
+          if (t) {
+            s.iconKey = key;
+            s.icon.texture = t;
+            s.icon.width = 14;
+            s.icon.height = 14;
+            s.icon.visible = true;
+          }
+        }
+      }
+
+      // Gates swap texture between closed and open (mode 'open' draws raised).
+      if (v.kind === 'gate') {
+        const open = v.gate === 'open';
+        if (open !== s.gateOpenShown && tex.gate_open) {
+          s.gateOpenShown = open;
+          s.body.texture = open ? tex.gate_open : tex.gate;
+        }
+      }
 
       // Squads: hide the figures of fallen men (the hp pool maps to men standing).
       if (s.menShown >= 0) {

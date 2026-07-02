@@ -159,6 +159,29 @@ function formationTargets(world: World, ids: EntityId[], x: number, y: number, f
   return ids.map((id) => targets.get(id)!);
 }
 
+// Explicit line order (right-click-drag): spread the units evenly along the
+// dragged segment. Units are slotted by their projection onto the line so the
+// group slides into place without crossing over itself.
+function lineTargets(world: World, ids: EntityId[], x1: number, y1: number, x2: number, y2: number): Vec2[] {
+  const n = ids.length;
+  if (n === 1) return [{ x: (x1 + x2) / 2, y: (y1 + y2) / 2 }];
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const order = [...ids].sort((a, b) => {
+    const ta = world.transform.get(a)!, tb = world.transform.get(b)!;
+    return (ta.x * dx + ta.y * dy) - (tb.x * dx + tb.y * dy);
+  });
+  const targets = new Map<EntityId, Vec2>();
+  order.forEach((id, i) => {
+    const f = i / (n - 1);
+    targets.set(id, {
+      x: clamp(x1 + dx * f, 0, MAP_PX),
+      y: clamp(y1 + dy * f, 0, MAP_PX),
+    });
+  });
+  return ids.map((id) => targets.get(id)!);
+}
+
 function pay(world: World, playerId: number, c: Cost): void {
   const s = world.players.get(playerId)!.stockpile;
   s.wood -= c.wood ?? 0;
@@ -207,7 +230,9 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         if (world.gatherer.has(id)) continue;
         movers.push(id);
       }
-      const targets = formationTargets(world, movers, tx, ty, msg.formation);
+      const targets = msg.lineTo
+        ? lineTargets(world, movers, tx, ty, clamp(msg.lineTo.x, 0, MAP_PX), clamp(msg.lineTo.y, 0, MAP_PX))
+        : formationTargets(world, movers, tx, ty, msg.formation);
       movers.forEach((id, i) => {
         const cs = world.combat.get(id);
         if (cs) {
@@ -393,6 +418,15 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       const id = msg.buildingId;
       if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'farm') return;
       world.farmAuto.set(id, !!msg.on);
+      world.markDirty(id);
+      return;
+    }
+
+    case 'gate': {
+      const id = msg.buildingId;
+      if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'gate') return;
+      if (!['locked', 'trade', 'open'].includes(msg.mode)) return;
+      world.gateMode.set(id, msg.mode);
       world.markDirty(id);
       return;
     }

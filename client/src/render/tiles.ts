@@ -9,7 +9,7 @@
 // not the world.
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
-  TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
+  TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
   TERRAIN_DIRT, TERRAIN_FLOWERS,
 } from '../../../shared/constants.js';
 import type { Viewport } from './entities.js';
@@ -116,6 +116,31 @@ export class TileLayer {
                 g.rect(tx * tile, ty * tile, tile, tile).fill(TILE_FALLBACK[code] ?? 0x777777);
                 node.addChild(g);
               }
+            }
+          }
+
+          // Environment props: a deterministic scatter of small decor sprites
+          // (rocks, grass tufts, mushrooms, stumps, bushes) on open grassland,
+          // so the ground reads as a living landscape rather than flat green.
+          // Local to the chunk (culls with it); same seed every session.
+          {
+            let dseed = 9219 + cy * nChunks * 7 + cx * 3;
+            const drnd = (): number => ((dseed = (dseed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+            const DECOR = ['decor_tuft', 'decor_tuft', 'decor_tuft', 'decor_rock', 'decor_bush', 'decor_shroom', 'decor_stump'];
+            for (let i = 0; i < 26; i++) {
+              const tx = tx0 + Math.floor(drnd() * (tx1 - tx0));
+              const ty = ty0 + Math.floor(drnd() * (ty1 - ty0));
+              const code = terrain[ty * mapTiles + tx];
+              if (code !== TERRAIN_GRASS && code !== TERRAIN_DIRT && code !== TERRAIN_FLOWERS) continue;
+              const t = tex[DECOR[Math.floor(drnd() * DECOR.length)]];
+              if (!t) continue;
+              const s = new Sprite(t);
+              s.anchor.set(0.5, 1);
+              const scale = 0.8 + drnd() * 0.5;
+              s.width = 16 * scale;
+              s.height = 16 * scale;
+              s.position.set((tx + 0.2 + drnd() * 0.6) * tile, (ty + 0.4 + drnd() * 0.6) * tile);
+              node.addChild(s);
             }
           }
         }

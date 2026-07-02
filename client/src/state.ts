@@ -44,6 +44,11 @@ export class ClientState {
 
   // Global market price multipliers (from the delta); drives the market panel.
   market: MarketState | null = null;
+  // Caravan road wear per tile (tileIndex -> level 1..ROAD_LEVELS), from init +
+  // delta increments. `roadsVersion` bumps on change so the road layer only
+  // rebuilds sprites when something actually changed.
+  readonly roads = new Map<number, number>();
+  roadsVersion = 0;
   // True when the server reports we have no units left (offer a restart).
   defeated = false;
   // Diplomacy roster: our relation with every other player (from the delta).
@@ -59,9 +64,16 @@ export class ClientState {
     return this.diplo?.find((d) => d.id === owner)?.name ?? null;
   }
 
+  applyRoads(pairs: Array<[number, number]> | undefined): void {
+    if (!pairs || pairs.length === 0) return;
+    for (const [tile, lvl] of pairs) this.roads.set(tile, lvl);
+    this.roadsVersion++;
+  }
+
   applyDelta(d: DeltaMsg): void {
     if (d.jobs) this.jobs = d.jobs;
     if (d.market) this.market = d.market;
+    this.applyRoads(d.roads);
     if (d.defeated !== undefined) this.defeated = d.defeated;
     if (d.diplo) this.diplo = d.diplo;
     for (const v of d.enter) {
@@ -113,5 +125,7 @@ export class ClientState {
     this.defeated = false; // a fresh init (incl. restart) clears the defeat state
     this.explored = null;
     this.exploredVersion = 0;
+    this.roads.clear();
+    this.roadsVersion++;
   }
 }

@@ -153,7 +153,20 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scoutCavalry', 'knight', 'horseArcher'], outline: 1 },
   tower: { hp: 350, vision: 8, footprint: 1, buildTime: 40, cost: { wood: 50, stone: 125 }, attack: 8, range: 170, attackCooldown: 1.0 },
   wall: { hp: 900, vision: 2, footprint: 1, buildTime: 8, cost: { stone: 25 } },
+  // Gate: a wall segment traffic can pass through. Who passes depends on its
+  // mode (locked / trade / open — see GateMode); pathfinding consults the gate
+  // per-mover. Slightly weaker than a wall (it's the obvious place to hit).
+  gate: { hp: 700, vision: 2, footprint: 1, buildTime: 12, cost: { stone: 30, wood: 20 } },
 };
+
+// --- caravan road wear -------------------------------------------------------
+// Trade caravans wear the ground they walk into roads (purely cosmetic). Each
+// caravan on an active route adds ROAD_WEAR_PER_S to the tile it stands on per
+// sim-second; wear caps at 1 and is quantised to ROAD_LEVELS steps on the wire.
+// A caravan crosses a tile in ~3 sim-seconds, so a full road takes roughly 30
+// round trips over the same ground.
+export const ROAD_WEAR_PER_S = 0.012;
+export const ROAD_LEVELS = 15; // wire quantisation: level = round(wear * ROAD_LEVELS)
 
 // --- resource nodes --------------------------------------------------------
 export const RESOURCE_NODE_STATS: Record<string, ResourceNodeStat> = {
