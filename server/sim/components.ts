@@ -5,6 +5,7 @@ import type {
   EntityKind,
   PlayerId,
   ResourceType,
+  Stance,
   Vec2,
   VillagerJob,
 } from '../../shared/types.js';
@@ -79,6 +80,9 @@ export interface CombatState {
   targetId: EntityId | null;
   commanded: boolean; // explicit attack order (don't auto-drop the target)
   attacking: boolean; // in range of target this tick (drives attack animation)
+  // How the squad auto-engages (see shared/types.ts Stance). Persisted.
+  // Buildings (towers) ignore it — they always fire at what's in range.
+  stance: Stance;
 }
 
 // A player's live state held in memory.

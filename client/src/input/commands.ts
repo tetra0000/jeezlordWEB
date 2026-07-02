@@ -25,7 +25,7 @@ import {
   visionOf,
 } from '../../../shared/stats.js';
 import type { Cost } from '../../../shared/stats.js';
-import type { ResourceType, VillagerJob } from '../../../shared/types.js';
+import type { Formation, ResourceType, Stance, VillagerJob } from '../../../shared/types.js';
 import {
   footprintInTerritory,
   footprintTouchesTerritory,
@@ -92,6 +92,19 @@ const JOB_LABEL: Record<VillagerJob, string> = {
   lumberjack: 'Lumberjacks', stonemason: 'Stonemasons', goldminer: 'Gold miners',
 };
 
+// Stance/formation panel (bottom-centre, when military squads are selected).
+const STANCES: Array<{ id: Stance; icon: string; name: string; desc: string }> = [
+  { id: 'aggressive', icon: '⚔', name: 'Aggressive', desc: 'Attack anything in sight and chase it far. Good for raids; risky to leave unattended.' },
+  { id: 'defensive', icon: '🛡', name: 'Defensive', desc: 'Engage nearby enemies but keep a short chase leash and return. The default.' },
+  { id: 'standGround', icon: '⚓', name: 'Stand Ground', desc: 'Hold this spot: attack only what comes into weapon range, never move.' },
+  { id: 'noAttack', icon: '🕊', name: 'No Attack', desc: 'Never auto-attack. Explicit attack orders still work. For sneaking past trouble.' },
+];
+const FORMATIONS: Array<{ id: Formation; icon: string; name: string; desc: string }> = [
+  { id: 'line', icon: '⚌', name: 'Line', desc: 'Move orders arrange the squads in a wide line abreast — a battle front.' },
+  { id: 'box', icon: '▦', name: 'Box', desc: 'Move orders arrange the squads in a compact block — good for marching.' },
+  { id: 'loose', icon: '⁘', name: 'Loose', desc: 'Move orders spread the squads out — fewer losses to catapults and volleys.' },
+];
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c),
@@ -123,6 +136,7 @@ export class Input {
     style: { fontSize: 13, fill: 0xffffff, fontFamily: 'system-ui, sans-serif', stroke: { color: 0x000000, width: 3 }, align: 'center' },
   });
   private readonly panel = document.getElementById('command-panel')!;
+  private readonly stanceEl = document.getElementById('stance-panel')!;
   private readonly villagerEl = document.getElementById('villager-panel')!;
   private readonly adminEl = document.getElementById('admin-panel')!;
   private readonly infoEl = document.getElementById('info-panel')!;
@@ -141,6 +155,9 @@ export class Input {
   private infoKey = '';
   private adminKey = '';
   private villagerKey = '';
+  private stanceKey = '';
+  // The player's chosen movement formation, sent with every group move order.
+  private formation: Formation = 'line';
   private toastTimer = 0;
 
   constructor(
@@ -360,8 +377,8 @@ export class Input {
       this.r.entities.ping(target.view.x, target.view.y, 0xff5a5a);
     } else {
       // Shift queues the click as a waypoint after the current order; a plain
-      // click replaces it.
-      this.net.send({ t: 'move', unitIds: ids, x: p.x, y: p.y, queue: this.shift });
+      // click replaces it. The current formation shapes the group's arrival.
+      this.net.send({ t: 'move', unitIds: ids, x: p.x, y: p.y, queue: this.shift, formation: this.formation });
       sound.play('move', { pan });
       this.r.entities.ping(p.x, p.y, this.shift ? 0xffd24a : 0x8ad06a);
     }
@@ -556,6 +573,7 @@ export class Input {
     this.updateInfoPanel();
     this.updateAdminPanel();
     this.updateVillagerPanel();
+    this.updateStancePanel();
     if (this.toastTimer > 0 && (this.toastTimer -= 1) === 0) this.toastEl.classList.remove('show');
   }
 
@@ -614,6 +632,64 @@ export class Input {
         const job = (btn as HTMLElement).dataset.job as VillagerJob;
         const cur = this.state.jobs?.counts[job] ?? 0;
         this.net.send({ t: 'assignJob', job, count: Math.max(0, cur - 1) });
+      });
+    }
+  }
+
+  // --- stance/formation panel (bottom-centre) --------------------------------
+  // Shown while military squads are selected: 4 stance buttons (applied to the
+  // selection via the `stance` intent) and 3 formation buttons (a client-side
+  // preference sent with every move order). Rebuilt only when its visible
+  // signature changes.
+  private updateStancePanel(): void {
+    const ids = this.selectedUnits();
+    if (ids.length === 0) {
+      if (this.stanceKey !== '') { this.stanceKey = ''; this.stanceEl.classList.add('hidden'); }
+      return;
+    }
+    // The selection's common stance ('' = mixed) drives the highlight.
+    let common: Stance | '' | null = null;
+    for (const id of ids) {
+      const st = this.state.entities.get(id)?.view.stance ?? 'defensive';
+      if (common === null) common = st;
+      else if (common !== st) { common = ''; break; }
+    }
+    const key = `${ids.length}|${common}|${this.formation}`;
+    if (key === this.stanceKey) return;
+    this.stanceKey = key;
+    // Rebuilding drops any hovered button (its mouseleave never fires) — clear
+    // the DOM-tooltip lock so the canvas tooltip isn't suppressed forever.
+    this.uiTipActive = false;
+    this.hideTip();
+
+    const parts = [`<span class="sp-label">Stance</span>`];
+    for (const s of STANCES) {
+      parts.push(`<button class="sp-stance${common === s.id ? ' active' : ''}${common === '' ? ' mixed' : ''}" data-stance="${s.id}">${s.icon} ${s.name}</button>`);
+    }
+    parts.push(`<span class="sp-sep"></span>`, `<span class="sp-label">Formation</span>`);
+    for (const f of FORMATIONS) {
+      parts.push(`<button class="sp-form${this.formation === f.id ? ' active' : ''}" data-form="${f.id}">${f.icon} ${f.name}</button>`);
+    }
+    this.stanceEl.innerHTML = parts.join('');
+    this.stanceEl.classList.remove('hidden');
+
+    for (const btn of this.stanceEl.querySelectorAll('.sp-stance')) {
+      const stance = (btn as HTMLElement).dataset.stance as Stance;
+      const meta = STANCES.find((s) => s.id === stance)!;
+      this.setTip(btn as HTMLElement, meta.name, meta.desc);
+      btn.addEventListener('click', () => {
+        this.net.send({ t: 'stance', unitIds: this.selectedUnits(), stance });
+        sound.play('click');
+      });
+    }
+    for (const btn of this.stanceEl.querySelectorAll('.sp-form')) {
+      const form = (btn as HTMLElement).dataset.form as Formation;
+      const meta = FORMATIONS.find((f) => f.id === form)!;
+      this.setTip(btn as HTMLElement, meta.name, meta.desc);
+      btn.addEventListener('click', () => {
+        this.formation = form;
+        sound.play('click');
+        this.updateStancePanel();
       });
     }
   }
@@ -766,6 +842,10 @@ export class Input {
     const squad = UNIT_STATS[v.kind]?.squad ?? 1;
     if (squad > 1)
       parts.push(`<div class="ip-row">⚔ ${squadMen(v.kind, v.hp, v.maxHp)} / ${squad} soldiers</div>`);
+    if (v.stance) {
+      const sMeta = STANCES.find((s) => s.id === v.stance);
+      if (sMeta) parts.push(`<div class="ip-row">${sMeta.icon} stance: ${sMeta.name}</div>`);
+    }
 
     if (v.build != null) {
       parts.push(`<div class="ip-row">🔨 building ${Math.round(v.build * 100)}%</div>`);

@@ -33,7 +33,7 @@ export function spawnUnit(
     pathIndex: -1,
     repathCooldown: 0,
   });
-  if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
+  if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false, stance: 'defensive' });
   if (kind === 'villager')
     world.gatherer.set(id, { state: 'idle', carrying: 0, carryType: null, nodeId: null, job: 'builder', idleTime: 0 });
   return id;
@@ -92,7 +92,7 @@ export function spawnBuilding(
     elapsed: underConstruction ? 0 : buildTime,
     complete: !underConstruction,
   });
-  if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
+  if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false, stance: 'defensive' });
   if (stat.trains) world.trainQueue.set(id, []);
   if (kind === 'townCenter') {
     world.tcRadius.set(id, TERRITORY_MIN_TILES);

@@ -290,6 +290,12 @@ export class World {
       if (g) v.job = g.job;
     }
 
+    // Military squad stance (owner-only; stripped for other viewers in snapshot).
+    if (this.movement.has(id) && !this.gatherer.has(id)) {
+      const cs = this.combat.get(id);
+      if (cs) v.stance = cs.stance;
+    }
+
     // Corpse: the original unit kind (sprite), its team (tint), and decay. Fade
     // is quantised so a slowly-decaying corpse doesn't emit a delta every tick.
     if (kind === 'corpse') {

@@ -4,11 +4,13 @@ import type {
   EntityId,
   EntityKind,
   EntityView,
+  Formation,
   JobReport,
   PlayerId,
   Pop,
   ResourceType,
   Shot,
+  Stance,
   Stockpile,
   VillagerJob,
 } from './types.js';
@@ -53,6 +55,9 @@ export interface MoveMsg {
   x: number;
   y: number;
   queue?: boolean; // shift-click: append as a waypoint instead of replacing the order
+  // Group formation: the server spreads the units' destinations into this shape
+  // around (x, y) instead of piling everyone onto the same point.
+  formation?: Formation;
 }
 
 // Place a building (server validates cost, free tiles, ownership). Construction
@@ -112,6 +117,13 @@ export interface FarmReseedMsg {
   on: boolean;
 }
 
+// Set the stance of one or more owned military squads (how they auto-engage).
+export interface StanceMsg {
+  t: 'stance';
+  unitIds: EntityId[];
+  stance: Stance;
+}
+
 // Clear orders for military units (stop moving / attacking). Villagers ignore
 // this — their job drives them.
 export interface StopMsg {
@@ -164,6 +176,7 @@ export type ClientMsg =
   | RallyMsg
   | RenameMsg
   | FarmReseedMsg
+  | StanceMsg
   | StopMsg
   | DeleteMsg
   | RestartMsg

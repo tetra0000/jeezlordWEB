@@ -48,6 +48,17 @@ export type EntityKind =
 
 export type ResourceType = 'wood' | 'gold' | 'food' | 'stone';
 
+// Military squad stances (how a squad behaves when enemies appear):
+//  - aggressive: auto-engage anything in sight and chase it far.
+//  - defensive: auto-engage nearby, but keep a short chase leash (default).
+//  - standGround: attack only what comes into weapon range; never move.
+//  - noAttack: never auto-attack (explicit attack orders still work).
+export type Stance = 'aggressive' | 'defensive' | 'standGround' | 'noAttack';
+
+// Group movement formations (how a multi-squad move order arranges its
+// destinations): a wide line abreast, a compact box, or a loose spread.
+export type Formation = 'line' | 'box' | 'loose';
+
 // A projectile a ranged attacker visibly looses. Purely cosmetic — the sim
 // resolves the damage instantly; this just tells the client what to draw flying.
 export type ProjectileKind = 'arrow' | 'boulder';
@@ -114,6 +125,7 @@ export interface EntityView {
   name?: string; // town centers: player-given name
   farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
+  stance?: Stance; // military squads: current stance (sent to the owner only)
   path?: Vec2[]; // units: remaining move waypoints in world px (sent to the owner only)
   // Corpses (kind === 'corpse'): the unit kind that died (which sprite to draw),
   // its team (original owner, for tinting; the corpse entity itself is neutral),

@@ -29,6 +29,7 @@ export function flush(db: Db, world: World): void {
     `INSERT OR REPLACE INTO ent_building_meta (entity_id, name, radius, farm_auto) VALUES (?, ?, ?, ?)`,
   );
   const upResource = h.prepare(`INSERT OR REPLACE INTO resource_nodes (entity_id, amount) VALUES (?, ?)`);
+  const upStance = h.prepare(`INSERT OR REPLACE INTO ent_stance (entity_id, stance) VALUES (?, ?)`);
   const upCorpse = h.prepare(
     `INSERT OR REPLACE INTO ent_corpse (entity_id, unit_kind, team, age) VALUES (?, ?, ?, ?)`,
   );
@@ -42,6 +43,7 @@ export function flush(db: Db, world: World): void {
   const delMeta = h.prepare('DELETE FROM ent_building_meta WHERE entity_id = ?');
   const delResource = h.prepare('DELETE FROM resource_nodes WHERE entity_id = ?');
   const delCorpse = h.prepare('DELETE FROM ent_corpse WHERE entity_id = ?');
+  const delStance = h.prepare('DELETE FROM ent_stance WHERE entity_id = ?');
 
   const deleteAllSidecars = (id: number) => {
     delMove.run(id);
@@ -52,6 +54,7 @@ export function flush(db: Db, world: World): void {
     delMeta.run(id);
     delResource.run(id);
     delCorpse.run(id);
+    delStance.run(id);
   };
 
   h.exec('BEGIN IMMEDIATE');
@@ -96,6 +99,10 @@ export function flush(db: Db, world: World): void {
 
       const amt = world.resourceAmount.get(id);
       if (amt != null) upResource.run(id, amt);
+
+      // Squad stance (units only — building combatants always fire at will).
+      const cs = world.combat.get(id);
+      if (cs && world.movement.has(id)) upStance.run(id, cs.stance);
 
       const cp = world.corpses.get(id);
       if (cp) upCorpse.run(id, cp.unitKind, cp.team, cp.age);

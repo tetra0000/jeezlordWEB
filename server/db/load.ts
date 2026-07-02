@@ -15,7 +15,7 @@ import {
   maxHpOf,
   speedOf,
 } from '../../shared/stats.js';
-import type { EntityKind, ResourceType, VillagerJob } from '../../shared/types.js';
+import type { EntityKind, ResourceType, Stance, VillagerJob } from '../../shared/types.js';
 import type { Db } from './db.js';
 import { World } from '../sim/world.js';
 import { applyBuildingFootprint } from '../sim/spawn.js';
@@ -78,6 +78,10 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT entity_id, amount FROM resource_nodes').all() as Array<{ entity_id: number; amount: number }>)
     resourceById.set(r.entity_id, r.amount);
 
+  const stanceById = new Map<number, string>();
+  for (const s of h.prepare('SELECT entity_id, stance FROM ent_stance').all() as Array<{ entity_id: number; stance: string }>)
+    stanceById.set(s.entity_id, s.stance);
+
   const corpseById = new Map<number, { unit_kind: string; team: number | null; age: number }>();
   for (const c of h.prepare('SELECT entity_id, unit_kind, team, age FROM ent_corpse').all() as Array<{ entity_id: number; unit_kind: string; team: number | null; age: number }>)
     corpseById.set(c.entity_id, c);
@@ -105,7 +109,11 @@ export function loadWorld(db: Db, world: World): void {
         pathIndex: -1,
         repathCooldown: 0,
       });
-      if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
+      if (combatOf(kind))
+        world.combat.set(id, {
+          cooldownLeft: 0, targetId: null, commanded: false, attacking: false,
+          stance: (stanceById.get(id) as Stance) ?? 'defensive',
+        });
       if (kind === 'villager') {
         const g = gatherById.get(id);
         world.gatherer.set(id, g
@@ -121,7 +129,7 @@ export function loadWorld(db: Db, world: World): void {
       world.construction.set(id, c
         ? { buildTime: c.build_time, elapsed: c.elapsed, complete: c.complete !== 0 }
         : { buildTime: BUILDING_STATS[kind].buildTime, elapsed: BUILDING_STATS[kind].buildTime, complete: true });
-      if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
+      if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false, stance: 'defensive' });
       if (BUILDING_STATS[kind].trains) {
         const qj = trainById.get(id);
         const q = qj ? (JSON.parse(qj) as TrainItem[]) : [];

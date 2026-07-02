@@ -227,6 +227,57 @@ button:active {
   color: #9ab;
 }
 
+/* Stance/formation panel: bottom-centre, above the command bar. Shown when
+   military squads are selected. */
+#stance-panel {
+  position: absolute;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #121712cc;
+  border: 1px solid #3a4a3a;
+  border-radius: 8px;
+  padding: 6px 10px;
+  pointer-events: auto;
+}
+#stance-panel .sp-label {
+  font-size: 10px;
+  color: #789;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 2px;
+}
+#stance-panel .sp-sep {
+  width: 1px;
+  height: 22px;
+  background: #3a4a3a;
+  margin: 0 4px;
+}
+#stance-panel button {
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #dfe;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+#stance-panel button:hover {
+  background: #2a362a;
+}
+#stance-panel button.active {
+  background: #4a6a3a;
+  border-color: #8ad06a;
+  color: #fff;
+}
+#stance-panel button.mixed {
+  border-style: dashed;
+}
+
 /* Info panel: details of the current selection, sits above the minimap. */
 #info-panel {
   position: absolute;

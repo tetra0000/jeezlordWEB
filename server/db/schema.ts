@@ -107,6 +107,12 @@ export function initSchema(db: DatabaseSync): void {
       farm_auto INTEGER
     );
 
+    -- Military squad stance (aggressive/defensive/standGround/noAttack).
+    CREATE TABLE IF NOT EXISTS ent_stance (
+      entity_id INTEGER PRIMARY KEY,
+      stance    TEXT NOT NULL
+    );
+
     -- Remaining harvestable amount for resource nodes.
     CREATE TABLE IF NOT EXISTS resource_nodes (
       entity_id INTEGER PRIMARY KEY,

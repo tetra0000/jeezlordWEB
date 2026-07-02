@@ -27,7 +27,7 @@ import {
   footprintTouchesTerritory,
   type TerritorySource,
 } from '../../shared/territory.js';
-import type { EntityKind, Stockpile } from '../../shared/types.js';
+import type { EntityId, EntityKind, Formation, Stance, Stockpile, Vec2 } from '../../shared/types.js';
 import {
   type GameContext,
   type Session,
@@ -118,6 +118,46 @@ function footprintVisible(world: World, playerId: number, tileX: number, tileY: 
   return true;
 }
 
+// Spread a group move order into a formation around the clicked point: a wide
+// line abreast (perpendicular to the direction of travel), a compact box, or a
+// loose spread. Units are slotted by their current sideways position so the
+// group doesn't cross over itself. No formation (or a single unit) = everyone
+// heads to the same point and the separation system shakes them apart.
+const FORMATION_SPACING: Record<Formation, number> = { line: TILE * 1.4, box: TILE * 1.4, loose: TILE * 2.4 };
+function formationTargets(world: World, ids: EntityId[], x: number, y: number, formation?: Formation): Vec2[] {
+  if (!formation || !(formation in FORMATION_SPACING) || ids.length < 2)
+    return ids.map(() => ({ x, y }));
+  // Centroid -> travel direction; perpendicular is the formation's width axis.
+  let cx = 0, cy = 0;
+  for (const id of ids) { const tf = world.transform.get(id)!; cx += tf.x; cy += tf.y; }
+  cx /= ids.length; cy /= ids.length;
+  const len = Math.hypot(x - cx, y - cy);
+  const fx = len > 1 ? (x - cx) / len : 1;
+  const fy = len > 1 ? (y - cy) / len : 0;
+  const px = -fy, py = fx;
+  const sp = FORMATION_SPACING[formation];
+  const n = ids.length;
+  // Slot units by their sideways projection so left units take left slots.
+  const order = [...ids].sort((a, b) => {
+    const ta = world.transform.get(a)!, tb = world.transform.get(b)!;
+    return (ta.x * px + ta.y * py) - (tb.x * px + tb.y * py);
+  });
+  const cols = formation === 'line' ? n : Math.ceil(Math.sqrt(n));
+  const targets = new Map<EntityId, Vec2>();
+  order.forEach((id, i) => {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const rowN = Math.min(cols, n - row * cols); // last row may be short — centre it
+    const ox = (col - (rowN - 1) / 2) * sp;
+    const oy = row * sp;
+    targets.set(id, {
+      x: clamp(x + px * ox - fx * oy, 0, MAP_PX),
+      y: clamp(y + py * ox - fy * oy, 0, MAP_PX),
+    });
+  });
+  return ids.map((id) => targets.get(id)!);
+}
+
 function pay(world: World, playerId: number, c: Cost): void {
   const s = world.players.get(playerId)!.stockpile;
   s.wood -= c.wood ?? 0;
@@ -157,18 +197,42 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     case 'move': {
       const tx = clamp(msg.x, 0, MAP_PX);
       const ty = clamp(msg.y, 0, MAP_PX);
+      // Validate first, then spread the survivors into the requested formation.
+      const movers: EntityId[] = [];
       for (const id of msg.unitIds) {
         if (world.owner.get(id) !== playerId) continue;
         if (!world.movement.has(id)) continue;
         // Villagers are not hand-controlled — they follow their assigned job.
         if (world.gatherer.has(id)) continue;
+        movers.push(id);
+      }
+      const targets = formationTargets(world, movers, tx, ty, msg.formation);
+      movers.forEach((id, i) => {
         const cs = world.combat.get(id);
         if (cs) {
           cs.targetId = null;
           cs.commanded = false;
         }
-        if (msg.queue) queueMoveTarget(world, id, tx, ty);
-        else setMoveTarget(world, id, tx, ty);
+        if (msg.queue) queueMoveTarget(world, id, targets[i].x, targets[i].y);
+        else setMoveTarget(world, id, targets[i].x, targets[i].y);
+      });
+      return;
+    }
+
+    case 'stance': {
+      const st = msg.stance as Stance;
+      if (!['aggressive', 'defensive', 'standGround', 'noAttack'].includes(st)) return;
+      for (const id of msg.unitIds) {
+        if (world.owner.get(id) !== playerId) continue;
+        if (world.gatherer.has(id)) continue; // villagers have no stance
+        if (!world.movement.has(id)) continue; // buildings always fire at will
+        const cs = world.combat.get(id);
+        if (!cs || cs.stance === st) continue;
+        cs.stance = st;
+        // Drop any auto-acquired target so the new stance takes effect at once
+        // (an explicit attack order is kept — the player asked for that fight).
+        if (!cs.commanded) cs.targetId = null;
+        world.markDirty(id);
       }
       return;
     }

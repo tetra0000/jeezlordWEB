@@ -81,7 +81,13 @@ export function combatSystem(world: World, dt: number): void {
     if (!stat) continue;
     const tf = world.transform.get(id)!;
     const mobile = world.movement.has(id) && !isBuilding(kind);
-    const aggro = Math.max(stat.range + TILE, visionOf(kind) * TILE);
+    // Stance shapes the auto-engage radius and chase leash. Buildings (towers)
+    // ignore stance: they always fire at whatever comes into weapon range.
+    const stance = mobile ? cs.stance : 'defensive';
+    const sight = Math.max(stat.range + TILE, visionOf(kind) * TILE);
+    // standGround acquires only inside weapon range; noAttack never acquires.
+    const aggro = stance === 'standGround' ? stat.range : sight;
+    const leash = stance === 'aggressive' ? sight * 3 : sight * 1.5;
 
     // Validate / pick a target.
     let targetId = cs.targetId;
@@ -90,7 +96,7 @@ export function combatSystem(world: World, dt: number): void {
       cs.targetId = null;
       cs.commanded = false;
     }
-    if (targetId == null) {
+    if (targetId == null && stance !== 'noAttack') {
       targetId = acquireTarget(world, id, owner, aggro);
       cs.targetId = targetId;
       cs.commanded = false;
@@ -100,8 +106,9 @@ export function combatSystem(world: World, dt: number): void {
     const ttf = world.transform.get(targetId)!;
     const d = Math.hypot(ttf.x - tf.x, ttf.y - tf.y);
 
-    // Auto-acquired (non-commanded) targets have a leash.
-    if (!cs.commanded && d > aggro * 1.5) {
+    // Auto-acquired (non-commanded) targets have a stance-scaled leash; a
+    // stand-ground squad simply drops anything that leaves its weapon range.
+    if (!cs.commanded && d > (stance === 'standGround' ? stat.range : leash)) {
       cs.targetId = null;
       continue;
     }
@@ -140,8 +147,10 @@ export function combatSystem(world: World, dt: number): void {
           cs.commanded = false;
         }
       }
-    } else if (mobile) {
-      // Chase: repath only when our destination is stale (avoid per-tick repaths).
+    } else if (mobile && (stance !== 'standGround' || cs.commanded)) {
+      // Chase: repath only when our destination is stale (avoid per-tick
+      // repaths). Stand-ground squads never chase on their own (an explicit
+      // attack order still moves them).
       const mv = world.movement.get(id)!;
       const stale =
         !mv.target || mv.pathIndex < 0 || Math.hypot(mv.target.x - ttf.x, mv.target.y - ttf.y) > TILE * 1.5;
