@@ -73,90 +73,138 @@ class Img {
   }
 }
 
+// --- shared drawing helpers ---------------------------------------------------
+// Soft elliptical ground shadow under a unit (reads at any tint).
+function shadow(im, cx, cy, rx = 8, ry = 3) {
+  im.ellipse(cx, cy, rx, ry, [16, 16, 12], 80);
+}
+// A two-tone humanoid: lit torso with a shaded right edge, head, and legs.
+// Gives every figure a consistent, readable silhouette with cheap depth.
+function body(im, x, y, w, h) {
+  im.rect(x, y, w, h, L);
+  im.rect(x + w - 2, y, 2, h, M); // shaded edge
+  im.rect(x, y, w, 1, W); // shoulder highlight
+}
+function head(im, cx, cy, r = 5, helmet = false) {
+  im.circle(cx, cy, r, L);
+  im.px(cx - 2, cy, D); // eyes read as a face at a glance
+  im.px(cx + 2, cy, D);
+  if (helmet) {
+    im.rect(cx - r, cy - r, r * 2 + 1, r - 1, M); // helm dome
+    im.rect(cx - r, cy - 2, r * 2 + 1, 1, D); // brim
+  }
+}
+function legs(im, cx, y, gap = 3, h = 5) {
+  im.rect(cx - gap - 1, y, 3, h, M);
+  im.rect(cx + gap - 1, y, 3, h, M);
+}
+
 // --- units (32x32, tintable) -----------------------------------------------
 function villager() {
   const im = new Img(32, 32);
-  im.rect(12, 16, 8, 11, L); // torso
-  im.circle(16, 11, 5, L); // head
-  im.rect(11, 26, 3, 5, M); // legs
-  im.rect(18, 26, 3, 5, M);
+  shadow(im, 16, 29, 7, 2);
+  body(im, 12, 16, 8, 11);
+  head(im, 16, 11);
+  legs(im, 16, 26);
+  im.line(22, 24, 25, 15, M, 0); // walking staff
   im.outline();
   im.save('villager');
 }
 function militia() {
-  // A rough figure with a club — cheap rabble.
+  // A rough figure with a club — cheap rabble, bare head, ragged tunic.
   const im = new Img(32, 32);
-  im.rect(12, 16, 8, 11, L); // plain tunic
-  im.circle(16, 11, 5, L);
-  im.rect(11, 26, 3, 5, M);
-  im.rect(18, 26, 3, 5, M);
+  shadow(im, 16, 30, 8, 2);
+  body(im, 12, 16, 8, 11);
+  im.px(13, 22, M); // patched tunic
+  im.px(17, 19, M);
+  head(im, 16, 11);
+  legs(im, 16, 26);
   im.line(23, 22, 27, 8, M, 1); // raised club
   im.circle(27, 8, 2, M); // club head
+  im.px(27, 7, W);
   im.outline();
   im.save('militia');
 }
 function warrior() {
   const im = new Img(32, 32);
-  im.rect(11, 14, 10, 13, L); // armoured torso
-  im.circle(16, 9, 5, L);
+  shadow(im, 16, 30, 9, 2);
+  body(im, 11, 14, 10, 13);
   im.rect(11, 12, 10, 2, M); // shoulder plate
-  im.rect(10, 27, 4, 4, M);
-  im.rect(18, 27, 4, 4, M);
-  im.line(24, 6, 24, 22, W, 1); // sword
+  im.rect(11, 20, 10, 1, M); // belt
+  head(im, 16, 9, 5, true); // helmed
+  legs(im, 16, 27, 4, 4);
+  im.line(24, 6, 24, 22, W, 1); // sword blade
   im.line(21, 9, 27, 9, M, 1); // crossguard
   im.circle(8, 19, 4, M); // round shield
-  im.circle(8, 19, 1, D);
+  im.circle(8, 19, 4, D, 0);
+  im.circle(8, 19, 1, W); // boss
   im.outline();
   im.save('warrior');
 }
 function spearman() {
   const im = new Img(32, 32);
-  im.rect(12, 15, 8, 12, L);
-  im.circle(16, 10, 5, L);
-  im.rect(11, 27, 3, 4, M);
-  im.rect(18, 27, 3, 4, M);
+  shadow(im, 16, 30, 8, 2);
+  body(im, 12, 15, 8, 12);
+  im.rect(12, 15, 8, 2, M); // leather cuirass line
+  head(im, 16, 10, 5, true);
+  legs(im, 16, 27, 3, 4);
   im.line(23, 28, 27, 4, M, 0); // long spear shaft
   im.rect(26, 2, 3, 5, W); // spearhead
+  im.px(27, 7, M); // socket
+  im.rect(6, 15, 3, 8, M); // tall shield on the off arm
+  im.rect(6, 15, 3, 1, W);
   im.outline();
   im.save('spearman');
 }
 function archer() {
   const im = new Img(32, 32);
-  im.rect(12, 14, 8, 12, L);
-  im.circle(16, 9, 5, L);
-  im.rect(11, 26, 3, 5, M);
-  im.rect(18, 26, 3, 5, M);
+  shadow(im, 16, 30, 8, 2);
+  body(im, 12, 14, 8, 12);
+  head(im, 16, 9);
+  im.rect(12, 5, 8, 2, M); // hood
+  legs(im, 16, 26);
   for (let a = -1.1; a <= 1.1; a += 0.12) im.px(24 + Math.cos(a) * 8, 16 + Math.sin(a) * 8, M); // bow arc
-  im.line(24, 8, 24, 24, M, 0); // string
+  im.line(24, 8, 24, 24, W, 0); // string
+  im.line(18, 16, 24, 16, D, 0); // nocked arrow
   im.outline();
   im.save('archer');
 }
 function longbowman() {
   // Like the archer but with a taller bow (nearly body height) + quiver.
   const im = new Img(32, 32);
-  im.rect(12, 14, 8, 12, L);
-  im.circle(16, 9, 5, L);
-  im.rect(11, 26, 3, 5, M);
-  im.rect(18, 26, 3, 5, M);
+  shadow(im, 16, 30, 8, 2);
+  body(im, 12, 14, 8, 12);
+  head(im, 16, 9);
+  im.rect(12, 5, 8, 2, M); // hood
+  legs(im, 16, 26);
   for (let a = -1.35; a <= 1.35; a += 0.1) im.px(24 + Math.cos(a) * 11, 15 + Math.sin(a) * 11, M); // tall bow arc
-  im.line(24, 4, 24, 26, M, 0); // long string
+  im.line(24, 4, 24, 26, W, 0); // long string
   im.rect(8, 12, 3, 9, M); // quiver on the back
   im.line(9, 10, 9, 12, W, 0); // arrow fletchings
+  im.px(8, 11, W);
   im.outline();
   im.save('longbowman');
+}
+// A shaded mount: body ellipse with belly shade, mane, tail, muzzle and legs.
+function mount(im, cx, cy, rx, ry) {
+  im.ellipse(cx, cy, rx, ry, L);
+  im.ellipse(cx, cy + Math.max(1, ry - 2), rx - 2, 2, M); // belly shade
+  im.line(cx - rx, cy, cx - rx - 2, cy + 5, M, 1); // tail
 }
 function scoutCavalry() {
   // A light, lean mount with a slim rider carrying a pennant — reads as a fast
   // recon rider rather than a heavy cavalryman.
   const im = new Img(32, 32);
-  im.ellipse(15, 20, 10, 4, L); // slimmer mount body
+  shadow(im, 16, 30, 11, 2);
+  mount(im, 15, 20, 10, 4);
   im.rect(8, 23, 2, 6, M); // legs (thin)
   im.rect(13, 23, 2, 6, M);
   im.rect(21, 23, 2, 6, M);
   im.ellipse(24, 16, 3, 2, L); // head
+  im.rect(22, 13, 2, 3, M); // mane
   im.line(27, 16, 30, 18, M, 0); // muzzle
-  im.rect(13, 8, 4, 8, L); // slim rider
-  im.circle(15, 7, 3, L);
+  body(im, 13, 8, 4, 8); // slim rider
+  head(im, 15, 6, 3);
   im.line(19, 4, 19, 14, M, 0); // pennant pole
   im.rect(19, 4, 5, 3, W); // pennant flag
   im.outline();
@@ -164,30 +212,37 @@ function scoutCavalry() {
 }
 function knight() {
   const im = new Img(32, 32);
-  im.ellipse(16, 20, 13, 7, L); // big mount
+  shadow(im, 16, 31, 13, 2);
+  mount(im, 16, 20, 13, 7);
   im.rect(6, 24, 3, 7, M);
   im.rect(12, 24, 3, 7, M);
   im.rect(20, 24, 3, 7, M);
   im.rect(25, 24, 3, 7, M);
-  im.ellipse(27, 13, 4, 3, L);
-  im.rect(13, 3, 6, 11, L); // armoured rider
-  im.circle(16, 3, 3, L);
-  im.line(20, 2, 20, 16, M, 0); // lance
+  im.ellipse(27, 13, 4, 3, L); // head
+  im.rect(24, 10, 3, 3, M); // mane
   im.rect(10, 20, 12, 3, M); // barding stripe
+  im.rect(10, 20, 12, 1, W);
+  body(im, 13, 3, 6, 11); // armoured rider
+  head(im, 16, 3, 3, true);
+  im.line(20, 2, 20, 16, M, 0); // lance
+  im.px(20, 1, W); // lance tip
+  im.rect(9, 8, 3, 6, M); // kite shield
   im.outline();
   im.save('knight');
 }
 function horseArcher() {
   const im = new Img(32, 32);
-  im.ellipse(15, 20, 11, 5, L); // mount
+  shadow(im, 16, 31, 11, 2);
+  mount(im, 15, 20, 11, 5);
   im.rect(7, 23, 3, 7, M);
   im.rect(13, 23, 3, 7, M);
   im.rect(21, 23, 3, 7, M);
   im.ellipse(25, 15, 3, 2, L); // head
-  im.rect(13, 7, 5, 9, L); // rider twisted to shoot
-  im.circle(15, 6, 3, L);
+  im.rect(23, 12, 2, 3, M); // mane
+  body(im, 13, 7, 5, 9); // rider twisted to shoot
+  head(im, 15, 5, 3);
   for (let a = -0.9; a <= 0.9; a += 0.12) im.px(21 + Math.cos(a) * 6, 10 + Math.sin(a) * 6, M); // compact bow
-  im.line(21, 4, 21, 16, M, 0); // string
+  im.line(21, 4, 21, 16, W, 0); // string
   im.outline();
   im.save('horseArcher');
 }
@@ -211,77 +266,133 @@ function caravan() {
 }
 function catapult() {
   const im = new Img(32, 32);
+  shadow(im, 17, 30, 11, 2);
   im.rect(8, 16, 18, 9, M); // frame
+  im.rect(8, 16, 18, 2, L); // lit rail
+  im.line(10, 18, 24, 18, D, 0); // frame brace
   im.circle(12, 26, 4, D); // wheels
   im.circle(22, 26, 4, D);
+  im.circle(12, 26, 1, M); // hubs
+  im.circle(22, 26, 1, M);
   im.line(10, 22, 24, 8, L, 1); // throwing arm
   im.circle(24, 8, 3, L); // bucket
+  im.circle(24, 8, 1, D); // stone in the bucket
   im.outline();
   im.save('catapult');
 }
 
 // --- buildings (square footprint*32, tintable) -----------------------------
+// A textured wall block: plank/course lines, a lit top edge and shaded base.
 function box(im, x, y, w, h) {
   im.rect(x, y, w, h, L);
-  im.rect(x, y, w, 3, W); // top edge highlight
+  for (let yy = y + 5; yy < y + h - 3; yy += 5) im.rect(x, yy, w, 1, M, 130); // wall courses
+  im.rect(x, y, w, 2, W); // top edge highlight
   im.rect(x, y + h - 3, w, 3, M); // bottom shade
+  im.rect(x, y, 1, h, W, 90); // lit left edge
+  im.rect(x + w - 2, y, 2, h, M, 150); // shaded right edge
+}
+// A pitched, shingled roof rising from (cx, baseY) to a peak `rise` px up.
+function roof(im, cx, baseY, halfW, rise) {
+  for (let i = 0; i < rise; i++) {
+    const w = Math.round(halfW * (1 - i / rise));
+    const c = i % 3 === 2 ? M : (i > rise - 4 ? W : L);
+    im.rect(cx - w, baseY - i, w * 2, 1, c);
+  }
+}
+// A framed door and a framed window.
+function door(im, x, y, w, h) {
+  im.rect(x - 1, y - 1, w + 2, h + 1, D); // frame
+  im.rect(x, y, w, h, M);
+  im.px(x + w - 2, y + Math.floor(h / 2), W); // handle
+}
+function windowPane(im, x, y, w = 8, h = 8) {
+  im.rect(x - 1, y - 1, w + 2, h + 2, M); // frame
+  im.rect(x, y, w, h, D);
+  im.px(x + 1, y + 1, W); // glint
 }
 function townCenter() {
   const s = 96;
   const im = new Img(s, s);
-  box(im, 14, 34, 68, 54);
-  // pitched roof
-  for (let i = 0; i < 30; i++) im.rect(48 - i, 34 - i, 2 * i, 2, M);
-  im.rect(40, 60, 16, 28, M); // door
-  im.rect(22, 44, 12, 12, D); // windows
-  im.rect(62, 44, 12, 12, D);
+  im.ellipse(48, 88, 40, 6, [16, 16, 12], 60); // ground shadow
+  box(im, 14, 40, 68, 48);
+  roof(im, 48, 40, 38, 26); // main shingled roof
+  im.rect(44, 8, 2, 12, D); // banner pole on the ridge
+  im.rect(46, 8, 8, 5, W); // banner (tints to team colour)
+  door(im, 40, 62, 16, 26);
+  windowPane(im, 22, 48, 10, 10);
+  windowPane(im, 64, 48, 10, 10);
+  im.rect(14, 58, 68, 1, M); // string course
   im.outline();
   im.save('townCenter');
 }
 function house() {
   const s = 64;
   const im = new Img(s, s);
-  box(im, 12, 28, 40, 30);
-  for (let i = 0; i < 22; i++) im.rect(32 - i, 28 - i, 2 * i, 2, M);
-  im.rect(26, 40, 12, 18, M); // door
+  im.ellipse(32, 58, 26, 4, [16, 16, 12], 60);
+  box(im, 12, 30, 40, 28);
+  roof(im, 32, 30, 24, 16);
+  im.rect(40, 10, 4, 8, M); // chimney
+  im.rect(40, 9, 4, 2, W);
+  door(im, 26, 42, 10, 16);
+  windowPane(im, 15, 36, 7, 7);
+  windowPane(im, 42, 36, 7, 7);
   im.outline();
   im.save('house');
 }
 function mill() {
   const s = 64;
   const im = new Img(s, s);
-  box(im, 14, 26, 36, 32);
-  im.circle(46, 36, 12, M); // wheel
-  im.circle(46, 36, 12, D, 0);
-  for (let a = 0; a < 6.28; a += 0.78) im.line(46, 36, 46 + Math.cos(a) * 12, 36 + Math.sin(a) * 12, D, 0);
+  im.ellipse(32, 58, 26, 4, [16, 16, 12], 60);
+  box(im, 12, 28, 34, 30);
+  roof(im, 29, 28, 20, 12);
+  door(im, 22, 44, 10, 14);
+  im.circle(48, 38, 13, M); // water wheel
+  im.circle(48, 38, 13, D, 0);
+  im.circle(48, 38, 3, D);
+  for (let a = 0; a < 6.28; a += 0.78) im.line(48, 38, 48 + Math.cos(a) * 12, 38 + Math.sin(a) * 12, D, 0);
   im.outline();
   im.save('mill');
 }
 function lumbercamp() {
   const s = 32;
   const im = new Img(s, s);
-  box(im, 6, 14, 16, 14);
-  im.ellipse(24, 22, 6, 3, [120, 82, 44]); // log pile (wood colour reads even tinted)
+  im.ellipse(16, 29, 13, 2, [16, 16, 12], 60);
+  box(im, 5, 14, 15, 14);
+  roof(im, 12, 14, 9, 6);
+  im.ellipse(25, 23, 6, 3, [120, 82, 44]); // log pile (wood colour reads even tinted)
+  im.ellipse(25, 21, 5, 2, [140, 98, 54]);
+  im.line(24, 12, 28, 6, M, 1); // leaning axe
+  im.rect(27, 4, 3, 3, W);
   im.outline();
   im.save('lumbercamp');
 }
 function miningcamp() {
   const s = 32;
   const im = new Img(s, s);
-  box(im, 6, 14, 16, 14);
+  im.ellipse(16, 29, 13, 2, [16, 16, 12], 60);
+  box(im, 5, 14, 15, 14);
+  roof(im, 12, 14, 9, 6);
   im.line(22, 24, 28, 14, M, 1); // pick handle
   im.line(25, 12, 31, 16, D, 1); // pick head
+  im.circle(25, 26, 2, [150, 150, 156]); // ore chunks
+  im.circle(29, 25, 2, [168, 168, 174]);
   im.outline();
   im.save('miningcamp');
 }
 function market() {
-  // 64x64 (footprint 2): a market stall — body, striped awning, a coin.
+  // 64x64 (footprint 2): a market stall — body, striped awning, crates, a coin.
   const s = 64;
   const im = new Img(s, s);
+  im.ellipse(32, 58, 26, 4, [16, 16, 12], 60);
   box(im, 14, 30, 36, 28);
   im.rect(22, 42, 20, 16, M); // counter opening
-  for (let i = 0; i < 9; i++) im.rect(10 + i * 5, 24, 5, 8, i % 2 ? M : L); // striped awning
-  im.rect(10, 24, 44, 2, W); // awning lip
+  im.rect(22, 42, 20, 2, D); // counter shade
+  for (let i = 0; i < 9; i++) im.rect(10 + i * 5, 22, 5, 10, i % 2 ? M : W); // striped awning
+  im.rect(10, 22, 44, 2, W); // awning lip
+  im.rect(9, 22, 2, 36, M); // awning posts
+  im.rect(53, 22, 2, 36, M);
+  im.rect(52, 48, 9, 9, [140, 104, 60]); // crate
+  im.rect(52, 52, 9, 1, [96, 70, 40]);
   im.circle(32, 50, 4, W); // coin
   im.circle(32, 50, 4, M, 0);
   im.outline();
@@ -290,8 +401,14 @@ function market() {
 function militaryBuilding(name, glyphDraw) {
   const s = 96;
   const im = new Img(s, s);
-  box(im, 12, 30, 72, 58);
+  im.ellipse(48, 90, 40, 5, [16, 16, 12], 60);
+  box(im, 12, 34, 72, 54);
+  // Crenellated parapet instead of a roof — reads as a military work.
+  for (let x = 12; x < 84; x += 10) im.rect(x, 26, 6, 8, L);
+  im.rect(12, 32, 72, 3, M);
   im.rect(40, 58, 16, 30, M); // gate
+  im.rect(40, 58, 16, 3, D); // gate arch shadow
+  im.rect(47, 58, 2, 30, D); // double doors
   glyphDraw(im);
   im.outline();
   im.save(name);
@@ -300,35 +417,51 @@ function militaryBuilding(name, glyphDraw) {
 // --- resources (colored, no tint) ------------------------------------------
 function tree() {
   const im = new Img(32, 32);
+  im.ellipse(16, 29, 9, 2, [24, 34, 20], 110); // canopy shadow on the ground
   im.rect(14, 20, 5, 10, [104, 70, 38]); // trunk
+  im.rect(14, 20, 2, 10, [126, 88, 48]); // lit side of the trunk
   im.circle(16, 14, 11, [54, 110, 46]); // canopy
-  im.circle(12, 12, 6, [64, 124, 54]);
-  im.circle(21, 13, 6, [46, 98, 40]);
+  im.circle(12, 11, 6, [72, 134, 58]); // sunlit lobe (upper-left)
+  im.circle(21, 13, 6, [42, 92, 38]); // shaded lobe
+  im.circle(17, 8, 4, [86, 148, 66]); // crown highlight
+  for (const [x, y] of [[10, 16], [19, 18], [14, 12], [22, 10]]) im.px(x, y, [96, 158, 74]); // leaf glints
   im.outline([30, 50, 26]);
   im.save('tree');
 }
 function gold() {
   const im = new Img(32, 32);
+  im.ellipse(16, 28, 11, 2, [24, 24, 20], 110);
   im.circle(16, 20, 11, [120, 118, 120]); // rock
+  im.circle(12, 16, 5, [138, 136, 138]); // lit face
+  im.circle(20, 24, 5, [100, 98, 102]); // shaded face
   im.circle(13, 18, 3, [245, 205, 70]); // nuggets
   im.circle(20, 21, 3, [255, 220, 90]);
-  im.circle(16, 15, 2, [255, 230, 120]);
+  im.circle(16, 14, 2, [255, 230, 120]);
+  im.px(13, 17, [255, 245, 170]); // sparkle
+  im.px(20, 20, [255, 245, 170]);
   im.outline([60, 58, 60]);
   im.save('gold');
 }
 function stone() {
   const im = new Img(32, 32);
+  im.ellipse(17, 28, 11, 2, [24, 24, 20], 110);
   im.circle(13, 21, 7, [150, 150, 156]);
   im.circle(21, 19, 8, [168, 168, 174]);
   im.circle(17, 23, 6, [132, 132, 140]);
+  im.circle(22, 16, 4, [190, 190, 196]); // lit top facet
+  im.line(18, 20, 24, 22, [110, 110, 118], 0); // crack
   im.outline([70, 70, 76]);
   im.save('stone');
 }
 function berry() {
   const im = new Img(32, 32);
+  im.ellipse(16, 28, 10, 2, [24, 34, 20], 110);
   im.circle(16, 19, 11, [58, 116, 52]); // bush
-  for (const [x, y] of [[12, 16], [20, 17], [16, 22], [11, 22], [22, 23], [16, 14]])
+  im.circle(12, 15, 5, [74, 136, 62]); // lit side
+  for (const [x, y] of [[12, 16], [20, 17], [16, 22], [11, 22], [22, 23], [16, 14]]) {
     im.circle(x, y, 2, [206, 54, 64]); // berries
+    im.px(x - 1, y - 1, [240, 120, 130]); // glint
+  }
   im.outline([32, 64, 30]);
   im.save('berry');
 }
@@ -482,34 +615,70 @@ mill();
 lumbercamp();
 miningcamp();
 market();
-militaryBuilding('barracks', (im) => im.line(34, 44, 50, 44, D, 1)); // sword glyph
-militaryBuilding('range', (im) => {
-  im.circle(48, 50, 9, D, 0);
-  im.circle(48, 50, 5, D, 0);
-  im.circle(48, 50, 2, D);
+militaryBuilding('barracks', (im) => {
+  // Crossed swords over the gate.
+  im.line(38, 40, 58, 52, W, 1);
+  im.line(58, 40, 38, 52, W, 1);
+  im.px(38, 40, D); im.px(58, 40, D);
+  im.rect(20, 44, 6, 12, M); // weapon rack by the wall
+  im.line(21, 44, 21, 56, D, 0);
+  im.line(24, 44, 24, 56, D, 0);
 });
-militaryBuilding('stable', (im) => im.ellipse(48, 50, 10, 5, M));
+militaryBuilding('range', (im) => {
+  // Archery target + a strung bow leaning on the wall.
+  im.circle(60, 46, 9, W);
+  im.circle(60, 46, 9, D, 0);
+  im.circle(60, 46, 5, M);
+  im.circle(60, 46, 2, D);
+  for (let a = -1.0; a <= 1.0; a += 0.1) im.px(26 + Math.cos(a) * 8, 48 + Math.sin(a) * 8, D);
+  im.line(26, 40, 26, 56, M, 0);
+});
+militaryBuilding('stable', (im) => {
+  // Horse head over the gate + a fence rail.
+  im.ellipse(48, 44, 6, 4, W);
+  im.ellipse(52, 41, 3, 2, W); // muzzle
+  im.px(47, 43, D); // eye
+  im.rect(18, 50, 16, 2, M); // fence
+  im.rect(19, 46, 2, 8, M);
+  im.rect(30, 46, 2, 8, M);
+});
 (() => {
   // tower: tall, footprint 1 -> 32px square, drawn as a turret
   const im = new Img(32, 32);
+  im.ellipse(16, 30, 10, 2, [16, 16, 12], 60);
   im.rect(9, 8, 14, 22, L);
-  for (let x = 9; x < 23; x += 5) im.rect(x, 5, 3, 4, M); // battlements
-  im.rect(13, 16, 6, 7, D); // window
+  for (let yy = 12; yy < 28; yy += 5) im.rect(9, yy, 14, 1, M, 130); // stone courses
+  im.rect(9, 8, 2, 22, W, 90); // lit edge
+  im.rect(21, 8, 2, 22, M); // shaded edge
+  for (let x = 8; x < 24; x += 5) im.rect(x, 4, 3, 5, L); // battlements
+  im.rect(8, 8, 16, 1, M);
+  windowPane(im, 13, 16, 6, 7);
   im.outline();
   im.save('tower');
 })();
 (() => {
   const im = new Img(32, 32); // wall block
   im.rect(2, 8, 28, 18, L);
-  for (let x = 2; x < 30; x += 7) im.rect(x, 4, 5, 4, M); // crenellations
-  im.line(2, 17, 30, 17, M, 0);
+  // Staggered stone coursing.
+  for (let yy = 12; yy < 26; yy += 5) im.rect(2, yy, 28, 1, M, 150);
+  for (let x = 6; x < 30; x += 8) im.rect(x, 8, 1, 4, M, 120);
+  for (let x = 2; x < 30; x += 8) im.rect(x, 13, 1, 4, M, 120);
+  for (let x = 2; x < 30; x += 7) im.rect(x, 4, 5, 4, L); // crenellations
+  im.rect(2, 8, 28, 1, W);
+  im.rect(2, 23, 28, 3, M); // base shade
   im.outline();
   im.save('wall');
 })();
 (() => {
-  const im = new Img(64, 64); // farm: tilled field
+  const im = new Img(64, 64); // farm: tilled field with sprouting rows
   im.rect(8, 8, 48, 48, [150, 120, 70]);
   for (let y = 12; y < 56; y += 6) im.rect(8, y, 48, 2, [120, 92, 52]);
+  let seed = 606;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let y = 13; y < 56; y += 6)
+    for (let x = 10; x < 54; x += 4)
+      if (rnd() < 0.7) im.px(x + rnd() * 2, y, [96, 150, 60]); // green sprouts
+  im.rect(8, 8, 48, 1, [170, 140, 86]); // lit top edge
   im.outline([90, 70, 40]);
   im.save('farm');
 })();
