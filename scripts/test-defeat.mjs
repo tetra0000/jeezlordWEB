@@ -1,4 +1,4 @@
-// Verifies defeat & restart: lose all units -> server flags `defeated` -> the
+﻿// Verifies defeat & restart: lose all units -> server flags `defeated` -> the
 // `restart` intent re-seeds the player fresh (new init, units again, not
 // defeated). Run with TIME_SCALE=30.
 import WebSocket from 'ws';
@@ -10,7 +10,7 @@ let pid = -1;
 let defeated = false;
 let initCount = 0;
 const send = (m) => ws.send(JSON.stringify(m));
-const ownUnits = () => [...ents.values()].filter((e) => e.owner === pid && (e.kind === 'villager' || e.kind === 'scout' || e.kind === 'infantry'));
+const ownUnits = () => [...ents.values()].filter((e) => e.owner === pid && (e.kind === 'villager' || e.kind === 'scoutCavalry' || e.kind === 'warrior'));
 
 ws.on('open', () => send({ t: 'register', username: user, password: 'hunter2' }));
 ws.on('error', (e) => { console.error('ws', e.message); process.exit(1); });

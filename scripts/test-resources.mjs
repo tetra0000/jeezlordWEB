@@ -1,4 +1,4 @@
-// Verifies the resource/drop-off rework under the v8 job model:
+﻿// Verifies the resource/drop-off rework under the v8 job model:
 //  - lumberjacks gather wood and a lumber camp accepts the deposit,
 //  - resources stay visible through fog once discovered (AoE memory).
 // Villagers can no longer be hand-controlled, so the "scout" is a trained
@@ -80,7 +80,7 @@ const trainTimer = setInterval(() => {
   const b = own('barracks')[0];
   if (b && b.build == null) {
     trained = true;
-    send({ t: 'train', buildingId: b.id, unit: 'infantry' });
+    send({ t: 'train', buildingId: b.id, unit: 'warrior' });
     console.log('barracks done; training infantry scout');
   }
 }, 1000);
@@ -92,7 +92,7 @@ const huntTimer = setInterval(() => {
   const tc = own('townCenter')[0];
   if (!tc) return;
   if (scoutId < 0) {
-    const inf = own('infantry')[0];
+    const inf = own('warrior')[0];
     if (!inf) return;
     scoutId = inf.id;
     scoutHome = { x: inf.x, y: inf.y };

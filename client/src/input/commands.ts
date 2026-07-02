@@ -20,6 +20,7 @@ import {
   isUnit,
   marketBuyTotal,
   marketSellTotal,
+  squadMen,
   townCenterCost,
   visionOf,
 } from '../../../shared/stats.js';
@@ -45,8 +46,10 @@ const BUILDABLE: EntityKind[] = [
 const LABEL: Record<string, string> = {
   townCenter: 'Town Center', house: 'House', mill: 'Mill', lumbercamp: 'Lumber Camp',
   miningcamp: 'Mining Camp', farm: 'Farm', market: 'Market', barracks: 'Barracks', range: 'Archery', stable: 'Stable',
-  tower: 'Tower', wall: 'Wall', villager: 'Villager', infantry: 'Infantry', archer: 'Archer',
-  scout: 'Scout', cavalry: 'Cavalry', horse: 'Knight', catapult: 'Catapult',
+  tower: 'Tower', wall: 'Wall', villager: 'Villager',
+  militia: 'Militia', warrior: 'Warriors', spearman: 'Spearmen', archer: 'Archers',
+  longbowman: 'Longbowmen', scoutCavalry: 'Scout Cavalry', knight: 'Knights',
+  horseArcher: 'Horse Archers', catapult: 'Catapult',
   tree: 'Tree', gold: 'Gold Mine', stone: 'Stone', berry: 'Berry Bush',
 };
 // One-line "what does this do" blurbs shown as hover tooltips on the build/train
@@ -60,18 +63,21 @@ const DESC: Record<string, string> = {
   miningcamp: 'Gold & stone drop-off: adds Miner capacity and a 15-tile harvest radius — miners work any gold/stone within it. (Not territory; units don’t heal here.)',
   farm: 'Grows food; one Farmer works it. Auto-reseeds with wood when empty (toggle in its panel).',
   market: 'Trade wood/food/stone for gold and back. Select it to open the trade panel; prices shift with trade and drift back to baseline over an hour.',
-  barracks: 'Trains Infantry and Catapults.',
-  range: 'Trains Archers.',
-  stable: 'Trains Scouts, Cavalry and Knights.',
+  barracks: 'Trains Militia, Warrior and Spearman squads, plus Catapults.',
+  range: 'Trains Archer and Longbowman squads.',
+  stable: 'Trains Scout Cavalry, Knights and Horse Archers.',
   tower: 'Defensive tower: fires at nearby enemies and has long vision. Build on your frontier.',
   wall: 'Cheap, tough barrier that blocks enemy movement.',
-  // units
+  // units (military units are SQUADS: they lose men, and damage, as hp drops)
   villager: 'Gathers resources and builds/repairs. Assign jobs in the Villagers panel (bottom-left).',
-  scout: 'Fast cavalry with long vision but weak attack — for exploring and spotting enemies.',
-  infantry: 'Sturdy melee soldier; solid all-rounder.',
-  archer: 'Ranged attacker: good damage from afar, fragile in melee.',
-  cavalry: 'Fast, hard-hitting mounted melee unit.',
-  horse: 'Knight: heavily armoured mounted unit with high HP and damage.',
+  militia: 'Squad of 4. Cheap, quick to raise — a mob with clubs. Melts against real soldiers.',
+  warrior: 'Squad of 4. Your line infantry: solid melee all-rounders.',
+  spearman: 'Squad of 4. A wall of points: 5x damage against cavalry — the hard counter to knights.',
+  archer: 'Squad of 4. Ranged volleys from afar; fragile in melee.',
+  longbowman: 'Squad of 4. Very long reach — outranges everything but towers and siege.',
+  scoutCavalry: 'Squad of 2. Fast with huge vision but a token attack — for exploring and spotting.',
+  knight: 'Squad of 2. Heavy shock cavalry: expensive, hits like a hammer. Fears spearmen.',
+  horseArcher: 'Squad of 2. Mobile skirmishers: shoot, ride away, repeat.',
   catapult: 'Slow siege engine: huge damage, devastating against buildings.',
 };
 const RES_TYPE: Record<string, string> = { tree: 'wood', gold: 'gold', stone: 'stone', berry: 'food' };
@@ -756,6 +762,11 @@ export class Input {
     const parts = [`<div class="ip-title">${title}</div>`, `<div class="ip-sub">${who}</div>`];
     parts.push(this.hpBar(v.hp, v.maxHp));
 
+    // Military squad: soldiers still standing (damage output scales with them).
+    const squad = UNIT_STATS[v.kind]?.squad ?? 1;
+    if (squad > 1)
+      parts.push(`<div class="ip-row">⚔ ${squadMen(v.kind, v.hp, v.maxHp)} / ${squad} soldiers</div>`);
+
     if (v.build != null) {
       parts.push(`<div class="ip-row">🔨 building ${Math.round(v.build * 100)}%</div>`);
     } else if (v.action && ACTION_LABEL[v.action]) {
@@ -971,6 +982,8 @@ export class Input {
     } else {
       const who = v.owner === this.state.playerId ? 'you' : v.owner == null ? 'neutral' : 'enemy';
       const lines = [`${who} · ${Math.ceil(v.hp)}/${v.maxHp} hp`];
+      const sq = UNIT_STATS[v.kind]?.squad ?? 1;
+      if (sq > 1) lines.push(`${squadMen(v.kind, v.hp, v.maxHp)}/${sq} soldiers`);
       if (v.build != null) lines.push(`building ${Math.round(v.build * 100)}%`);
       else if (v.train) lines.push(`training (${v.train.queued} queued)`);
       else if (v.action && ACTION_LABEL[v.action]) lines.push(ACTION_LABEL[v.action]);

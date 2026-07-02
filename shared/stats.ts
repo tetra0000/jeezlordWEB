@@ -6,17 +6,28 @@ import type { EntityKind, ProjectileKind, ResourceType, VillagerJob } from './ty
 
 export type Cost = Partial<{ wood: number; gold: number; food: number; stone: number }>;
 
+// Broad combat class, used for counter bonuses (e.g. spearmen vs cavalry).
+export type UnitClass = 'infantry' | 'ranged' | 'cavalry' | 'siege' | 'civilian';
+
 export interface UnitStat {
-  hp: number;
+  hp: number; // the SQUAD's shared hp pool (not per man)
   speed: number; // px/s
   vision: number; // tiles
-  attack: number;
+  attack: number; // the full squad's damage per volley/swing
   range: number; // px (melee ~ 1 tile)
   attackCooldown: number; // s between attacks
   trainTime: number; // s
   trainedAt: EntityKind; // building that trains it
   cost: Cost;
   pop: number; // population it consumes
+  // Squad size: how many soldiers this entity represents (drawn as that many
+  // figures). The squad loses men as its hp pool drops and deals proportionally
+  // less damage. 1 = a single figure (villager, siege engine).
+  squad: number;
+  uclass: UnitClass;
+  // Damage multiplier against target classes (counter units). E.g. spearmen
+  // deal 2.5x vs cavalry. Absent = 1x against everything.
+  bonusVs?: Partial<Record<UnitClass, number>>;
 }
 
 export interface BuildingStat {
@@ -57,18 +68,53 @@ export interface ResourceNodeStat {
 export const BASE_POP_CAP = 0;
 
 // --- units -----------------------------------------------------------------
+// Military units are SQUADS (see UnitStat.squad): the entity is a small group of
+// soldiers sharing one hp pool; damage output scales with men still standing.
+// The roster is an AoE2-flavoured tech ladder:
+//   barracks: militia -> warriors -> spearmen (anti-cavalry) + catapult (siege)
+//   archery range: archers -> longbowmen (longer reach)
+//   stable: scout cavalry (recon) -> knights (heavy shock) -> horse archers
 export const UNIT_STATS: Record<string, UnitStat> = {
-  villager: { hp: 25, speed: 55, vision: 4, attack: 3, range: 20, attackCooldown: 1.5, trainTime: 20, trainedAt: 'townCenter', cost: { food: 50 }, pop: 1 },
-  infantry: { hp: 45, speed: 60, vision: 5, attack: 6, range: 20, attackCooldown: 1.2, trainTime: 24, trainedAt: 'barracks', cost: { food: 60, gold: 20 }, pop: 1 },
-  archer: { hp: 30, speed: 60, vision: 6, attack: 5, range: 130, attackCooldown: 1.5, trainTime: 26, trainedAt: 'range', cost: { wood: 40, gold: 30 }, pop: 1 },
-  // Scout: a fast, cheap mounted recon unit — very high vision, very low attack.
-  // For exploring/spotting, not fighting. Trained at the stable; every player
-  // starts with one (see net/session.ts).
-  scout: { hp: 45, speed: 95, vision: 11, attack: 2, range: 20, attackCooldown: 2.0, trainTime: 18, trainedAt: 'stable', cost: { food: 60 }, pop: 1 },
-  cavalry: { hp: 80, speed: 70, vision: 5, attack: 9, range: 22, attackCooldown: 1.3, trainTime: 32, trainedAt: 'stable', cost: { food: 70, gold: 30 }, pop: 1 },
-  horse: { hp: 110, speed: 95, vision: 6, attack: 11, range: 24, attackCooldown: 1.2, trainTime: 40, trainedAt: 'stable', cost: { food: 80, gold: 50 }, pop: 2 },
-  catapult: { hp: 50, speed: 35, vision: 6, attack: 45, range: 220, attackCooldown: 4, trainTime: 80, trainedAt: 'barracks', cost: { wood: 160, gold: 80 }, pop: 3 },
+  villager: { hp: 25, speed: 55, vision: 4, attack: 3, range: 20, attackCooldown: 1.5, trainTime: 20, trainedAt: 'townCenter', cost: { food: 50 }, pop: 1, squad: 1, uclass: 'civilian' },
+  // Cheap early rabble: fast to raise, melts against real soldiers.
+  militia: { hp: 60, speed: 60, vision: 5, attack: 8, range: 20, attackCooldown: 1.4, trainTime: 22, trainedAt: 'barracks', cost: { food: 60 }, pop: 1, squad: 4, uclass: 'infantry' },
+  // The line infantry: solid all-round melee squad.
+  warrior: { hp: 100, speed: 58, vision: 5, attack: 14, range: 20, attackCooldown: 1.3, trainTime: 32, trainedAt: 'barracks', cost: { food: 60, gold: 25 }, pop: 2, squad: 4, uclass: 'infantry' },
+  // Anti-cavalry wall: modest damage, but a wall of points vs horses — the 5x
+  // bonus makes a spear squad a HARD counter (it beats a knight squad 1v1 at
+  // half the cost, AoE2 pikeman-style).
+  spearman: { hp: 85, speed: 58, vision: 5, attack: 9, range: 22, attackCooldown: 1.4, trainTime: 28, trainedAt: 'barracks', cost: { food: 45, wood: 30 }, pop: 2, squad: 4, uclass: 'infantry', bonusVs: { cavalry: 5 } },
+  archer: { hp: 55, speed: 60, vision: 6, attack: 10, range: 130, attackCooldown: 1.6, trainTime: 28, trainedAt: 'range', cost: { wood: 45, gold: 25 }, pop: 2, squad: 4, uclass: 'ranged' },
+  // Long reach, slow volley: outranges everything but towers/siege.
+  longbowman: { hp: 50, speed: 56, vision: 7, attack: 12, range: 190, attackCooldown: 1.9, trainTime: 40, trainedAt: 'range', cost: { wood: 60, gold: 45 }, pop: 2, squad: 4, uclass: 'ranged' },
+  // Fast, cheap mounted recon pair — very high vision, token attack. For
+  // exploring/spotting, not fighting. Every player starts with one squad.
+  scoutCavalry: { hp: 60, speed: 95, vision: 11, attack: 4, range: 22, attackCooldown: 2.0, trainTime: 20, trainedAt: 'stable', cost: { food: 70 }, pop: 1, squad: 2, uclass: 'cavalry' },
+  // Heavy shock cavalry: expensive, hits like a hammer.
+  knight: { hp: 150, speed: 70, vision: 6, attack: 18, range: 24, attackCooldown: 1.3, trainTime: 45, trainedAt: 'stable', cost: { food: 80, gold: 70 }, pop: 3, squad: 2, uclass: 'cavalry' },
+  // Mobile skirmishers: shoot on the move-ish (fast repositioning), fragile.
+  horseArcher: { hp: 80, speed: 85, vision: 8, attack: 9, range: 120, attackCooldown: 1.7, trainTime: 40, trainedAt: 'stable', cost: { food: 60, wood: 30, gold: 50 }, pop: 3, squad: 2, uclass: 'cavalry' },
+  catapult: { hp: 50, speed: 35, vision: 6, attack: 45, range: 220, attackCooldown: 4, trainTime: 80, trainedAt: 'barracks', cost: { wood: 160, gold: 80 }, pop: 3, squad: 1, uclass: 'siege' },
 };
+
+// How many soldiers of a squad are still standing at the given hp. Always at
+// least 1 while the squad lives (the last man carries the banner).
+export function squadMen(kind: EntityKind, hp: number, maxHp: number): number {
+  const squad = UNIT_STATS[kind]?.squad ?? 1;
+  if (squad <= 1) return 1;
+  return Math.max(1, Math.ceil((hp / maxHp) * squad));
+}
+
+// Damage multiplier for an attacker kind hitting a target kind: the squad's
+// remaining-men fraction times any class counter bonus (e.g. spears vs cavalry).
+export function damageMultiplier(attackerKind: EntityKind, attackerHp: number, attackerMaxHp: number, targetKind: EntityKind | undefined): number {
+  const a = UNIT_STATS[attackerKind];
+  if (!a) return 1; // towers etc. always hit at full strength
+  let mult = a.squad > 1 ? squadMen(attackerKind, attackerHp, attackerMaxHp) / a.squad : 1;
+  const targetClass = targetKind ? UNIT_STATS[targetKind]?.uclass : undefined;
+  if (targetClass && a.bonusVs?.[targetClass]) mult *= a.bonusVs[targetClass]!;
+  return mult;
+}
 
 // --- buildings -------------------------------------------------------------
 export const BUILDING_STATS: Record<string, BuildingStat> = {
@@ -85,9 +131,9 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   // Market: trade resources for gold (and back) at fluctuating prices. Not a
   // resource drop-off; its UI panel (shown when selected) is the trade desk.
   market: { hp: 500, vision: 4, footprint: 2, buildTime: 35, cost: { wood: 120, stone: 40 } },
-  barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['infantry', 'catapult'], outline: 1 },
-  range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer'], outline: 1 },
-  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scout', 'cavalry', 'horse'], outline: 1 },
+  barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['militia', 'warrior', 'spearman', 'catapult'], outline: 1 },
+  range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer', 'longbowman'], outline: 1 },
+  stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scoutCavalry', 'knight', 'horseArcher'], outline: 1 },
   tower: { hp: 350, vision: 8, footprint: 1, buildTime: 40, cost: { wood: 50, stone: 125 }, attack: 8, range: 170, attackCooldown: 1.0 },
   wall: { hp: 900, vision: 2, footprint: 1, buildTime: 8, cost: { stone: 25 } },
 };
@@ -221,10 +267,12 @@ export const COMBAT_DURATION_SCALE = 5;
 
 // Ranged attackers loose a visible projectile when they fire (cosmetic only —
 // damage is still applied instantly by the combat system). Melee units (absent
-// here) deal damage with no flying object. Archers/towers shoot arrows; the
-// catapult lobs a boulder.
+// here) deal damage with no flying object. Archer squads loose one arrow per
+// man still standing; the catapult lobs a boulder.
 export const PROJECTILE_OF: Partial<Record<EntityKind, ProjectileKind>> = {
   archer: 'arrow',
+  longbowman: 'arrow',
+  horseArcher: 'arrow',
   tower: 'arrow',
   catapult: 'boulder',
 };

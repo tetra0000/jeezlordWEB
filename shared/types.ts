@@ -10,13 +10,19 @@ export interface Vec2 {
 
 // Entity kinds. v0 only uses "villager"; the rest are reserved so the protocol
 // and placeholder-render table are stable as later milestones land.
+// Military units are SQUADS: one entity represents a small group of soldiers
+// (UnitStat.squad figures). The squad shares one hp pool; as it takes damage it
+// loses men and deals proportionally less damage. See shared/stats.ts.
 export type EntityKind =
   | 'villager'
-  | 'infantry'
+  | 'militia'
+  | 'warrior'
+  | 'spearman'
   | 'archer'
-  | 'scout'
-  | 'cavalry'
-  | 'horse'
+  | 'longbowman'
+  | 'scoutCavalry'
+  | 'knight'
+  | 'horseArcher'
   | 'catapult'
   | 'wall'
   | 'tower'

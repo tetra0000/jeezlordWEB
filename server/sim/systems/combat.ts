@@ -6,9 +6,11 @@ import {
   BUILDING_STATS,
   PROJECTILE_OF,
   combatOf,
+  damageMultiplier,
   isBuilding,
   isResourceNode,
   isUnit,
+  squadMen,
   visionOf,
 } from '../../../shared/stats.js';
 import type { EntityId, PlayerId } from '../../../shared/types.js';
@@ -113,13 +115,25 @@ export function combatSystem(world: World, dt: number): void {
       }
       if (cs.cooldownLeft <= 0) {
         const hp = world.health.get(targetId)!;
-        hp.hp -= stat.attack;
+        // Squads deal damage proportional to men still standing, with class
+        // counter bonuses (e.g. spearmen vs cavalry). Buildings hit at 1x.
+        const myHp = world.health.get(id)!;
+        const mult = damageMultiplier(kind, myHp.hp, myHp.maxHp, world.kind.get(targetId));
+        hp.hp -= stat.attack * mult;
         cs.cooldownLeft = stat.attackCooldown;
         world.markDirty(targetId);
-        // Visible projectile for ranged attackers (cosmetic; damage above is
-        // instant). Captured at the moment of the swing, from attacker to target.
+        // Visible projectiles for ranged attackers (cosmetic; damage above is
+        // instant). An archer squad looses one arrow per man still standing,
+        // each jittered a little so the volley reads as a volley.
         const proj = PROJECTILE_OF[kind];
-        if (proj) world.shots.push({ kind: proj, x: tf.x, y: tf.y, tx: ttf.x, ty: ttf.y, from: id, to: targetId });
+        if (proj) {
+          const volley = proj === 'arrow' && isUnit(kind) ? squadMen(kind, myHp.hp, myHp.maxHp) : 1;
+          for (let i = 0; i < volley; i++) {
+            const jx = volley > 1 ? (Math.random() - 0.5) * 18 : 0;
+            const jy = volley > 1 ? (Math.random() - 0.5) * 18 : 0;
+            world.shots.push({ kind: proj, x: tf.x + jx, y: tf.y + jy, tx: ttf.x + jx * 0.6, ty: ttf.y + jy * 0.6, from: id, to: targetId });
+          }
+        }
         if (hp.hp <= 0) {
           killEntity(world, targetId);
           cs.targetId = null;

@@ -128,8 +128,8 @@ function setupNewPlayer(world: World, playerId: PlayerId, tileX: number, tileY: 
   for (let i = 0; i < STARTING_VILLAGERS; i++) {
     spawnUnit(world, 'villager', playerId, baseX + (i - 1) * TILE, baseY);
   }
-  // A starting scout: fast, far-seeing, for early exploration (see UNIT_STATS).
-  spawnUnit(world, 'scout', playerId, baseX + STARTING_VILLAGERS * TILE, baseY);
+  // A starting scout cavalry squad: fast, far-seeing, for early exploration.
+  spawnUnit(world, 'scoutCavalry', playerId, baseX + STARTING_VILLAGERS * TILE, baseY);
   // Starter resource cluster around the house centre.
   const cx = tileX + Math.floor(f / 2);
   const cy = tileY + Math.floor(f / 2);

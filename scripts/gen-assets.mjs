@@ -83,16 +83,42 @@ function villager() {
   im.outline();
   im.save('villager');
 }
-function infantry() {
+function militia() {
+  // A rough figure with a club — cheap rabble.
+  const im = new Img(32, 32);
+  im.rect(12, 16, 8, 11, L); // plain tunic
+  im.circle(16, 11, 5, L);
+  im.rect(11, 26, 3, 5, M);
+  im.rect(18, 26, 3, 5, M);
+  im.line(23, 22, 27, 8, M, 1); // raised club
+  im.circle(27, 8, 2, M); // club head
+  im.outline();
+  im.save('militia');
+}
+function warrior() {
   const im = new Img(32, 32);
   im.rect(11, 14, 10, 13, L); // armoured torso
   im.circle(16, 9, 5, L);
+  im.rect(11, 12, 10, 2, M); // shoulder plate
   im.rect(10, 27, 4, 4, M);
   im.rect(18, 27, 4, 4, M);
-  im.line(24, 6, 24, 22, M, 1); // sword
+  im.line(24, 6, 24, 22, W, 1); // sword
   im.line(21, 9, 27, 9, M, 1); // crossguard
+  im.circle(8, 19, 4, M); // round shield
+  im.circle(8, 19, 1, D);
   im.outline();
-  im.save('infantry');
+  im.save('warrior');
+}
+function spearman() {
+  const im = new Img(32, 32);
+  im.rect(12, 15, 8, 12, L);
+  im.circle(16, 10, 5, L);
+  im.rect(11, 27, 3, 4, M);
+  im.rect(18, 27, 3, 4, M);
+  im.line(23, 28, 27, 4, M, 0); // long spear shaft
+  im.rect(26, 2, 3, 5, W); // spearhead
+  im.outline();
+  im.save('spearman');
 }
 function archer() {
   const im = new Img(32, 32);
@@ -105,19 +131,21 @@ function archer() {
   im.outline();
   im.save('archer');
 }
-function cavalry() {
+function longbowman() {
+  // Like the archer but with a taller bow (nearly body height) + quiver.
   const im = new Img(32, 32);
-  im.ellipse(16, 19, 11, 6, L); // mount body
-  im.rect(7, 22, 3, 7, M); // legs
-  im.rect(13, 22, 3, 7, M);
-  im.rect(22, 22, 3, 7, M);
-  im.ellipse(25, 14, 4, 3, L); // head
-  im.rect(14, 6, 5, 9, L); // rider
-  im.circle(16, 5, 3, L);
+  im.rect(12, 14, 8, 12, L);
+  im.circle(16, 9, 5, L);
+  im.rect(11, 26, 3, 5, M);
+  im.rect(18, 26, 3, 5, M);
+  for (let a = -1.35; a <= 1.35; a += 0.1) im.px(24 + Math.cos(a) * 11, 15 + Math.sin(a) * 11, M); // tall bow arc
+  im.line(24, 4, 24, 26, M, 0); // long string
+  im.rect(8, 12, 3, 9, M); // quiver on the back
+  im.line(9, 10, 9, 12, W, 0); // arrow fletchings
   im.outline();
-  im.save('cavalry');
+  im.save('longbowman');
 }
-function scout() {
+function scoutCavalry() {
   // A light, lean mount with a slim rider carrying a pennant — reads as a fast
   // recon rider rather than a heavy cavalryman.
   const im = new Img(32, 32);
@@ -132,9 +160,9 @@ function scout() {
   im.line(19, 4, 19, 14, M, 0); // pennant pole
   im.rect(19, 4, 5, 3, W); // pennant flag
   im.outline();
-  im.save('scout');
+  im.save('scoutCavalry');
 }
-function horse() {
+function knight() {
   const im = new Img(32, 32);
   im.ellipse(16, 20, 13, 7, L); // big mount
   im.rect(6, 24, 3, 7, M);
@@ -145,8 +173,23 @@ function horse() {
   im.rect(13, 3, 6, 11, L); // armoured rider
   im.circle(16, 3, 3, L);
   im.line(20, 2, 20, 16, M, 0); // lance
+  im.rect(10, 20, 12, 3, M); // barding stripe
   im.outline();
-  im.save('horse');
+  im.save('knight');
+}
+function horseArcher() {
+  const im = new Img(32, 32);
+  im.ellipse(15, 20, 11, 5, L); // mount
+  im.rect(7, 23, 3, 7, M);
+  im.rect(13, 23, 3, 7, M);
+  im.rect(21, 23, 3, 7, M);
+  im.ellipse(25, 15, 3, 2, L); // head
+  im.rect(13, 7, 5, 9, L); // rider twisted to shoot
+  im.circle(15, 6, 3, L);
+  for (let a = -0.9; a <= 0.9; a += 0.12) im.px(21 + Math.cos(a) * 6, 10 + Math.sin(a) * 6, M); // compact bow
+  im.line(21, 4, 21, 16, M, 0); // string
+  im.outline();
+  im.save('horseArcher');
 }
 function catapult() {
   const im = new Img(32, 32);
@@ -359,11 +402,14 @@ function fx(name, draw) {
 }
 
 villager();
-infantry();
+militia();
+warrior();
+spearman();
 archer();
-scout();
-cavalry();
-horse();
+longbowman();
+scoutCavalry();
+knight();
+horseArcher();
 catapult();
 townCenter();
 house();

@@ -5,7 +5,8 @@ import { Assets, Texture } from 'pixi.js';
 import type { EntityKind } from '../../../shared/types.js';
 
 const ENTITY_KINDS: EntityKind[] = [
-  'villager', 'infantry', 'archer', 'scout', 'cavalry', 'horse', 'catapult',
+  'villager', 'militia', 'warrior', 'spearman', 'archer', 'longbowman',
+  'scoutCavalry', 'knight', 'horseArcher', 'catapult',
   'townCenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'market', 'barracks', 'range', 'stable', 'tower', 'wall', 'farm',
   'tree', 'gold', 'stone', 'berry',
 ];

@@ -12,6 +12,7 @@ import {
   isBuilding,
   isResourceNode,
   isUnit,
+  maxHpOf,
   speedOf,
 } from '../../shared/stats.js';
 import type { EntityKind, ResourceType, VillagerJob } from '../../shared/types.js';
@@ -19,6 +20,17 @@ import type { Db } from './db.js';
 import { World } from '../sim/world.js';
 import { applyBuildingFootprint } from '../sim/spawn.js';
 import type { TrainItem } from '../sim/components.js';
+
+// Pre-squads unit kinds that may still exist in an older database, mapped to
+// their closest squad-era replacement. Remapped entities get their hp scaled to
+// the new pool (same fraction) and are marked dirty so the next flush rewrites
+// the row under the new kind.
+const LEGACY_KIND: Record<string, EntityKind> = {
+  infantry: 'warrior',
+  scout: 'scoutCavalry',
+  cavalry: 'knight',
+  horse: 'knight',
+};
 
 export function loadWorld(db: Db, world: World): void {
   const playerRows = db.handle
@@ -71,8 +83,18 @@ export function loadWorld(db: Db, world: World): void {
     corpseById.set(c.entity_id, c);
 
   for (const e of db.allEntities()) {
-    const { id, kind, owner_player_id: owner, x, y, hp, max_hp } = e;
+    const { id, owner_player_id: owner, x, y } = e;
+    let { kind, hp, max_hp } = e;
+    // Migrate pre-squads unit kinds: same hp fraction on the new squad's pool.
+    const remap = LEGACY_KIND[kind];
+    if (remap) {
+      const newMax = maxHpOf(remap);
+      hp = max_hp > 0 ? Math.max(1, Math.round((hp / max_hp) * newMax)) : newMax;
+      max_hp = newMax;
+      kind = remap;
+    }
     world.insert(id, kind, owner, x, y, hp, max_hp);
+    if (remap) world.markDirty(id);
 
     if (isUnit(kind)) {
       const m = moveById.get(id);
@@ -102,7 +124,10 @@ export function loadWorld(db: Db, world: World): void {
       if (combatOf(kind)) world.combat.set(id, { cooldownLeft: 0, targetId: null, commanded: false, attacking: false });
       if (BUILDING_STATS[kind].trains) {
         const qj = trainById.get(id);
-        world.trainQueue.set(id, qj ? (JSON.parse(qj) as TrainItem[]) : []);
+        const q = qj ? (JSON.parse(qj) as TrainItem[]) : [];
+        // Migrate legacy kinds queued before the squads roster.
+        for (const it of q) if (LEGACY_KIND[it.kind]) it.kind = LEGACY_KIND[it.kind];
+        world.trainQueue.set(id, q);
         const rp = rallyById.get(id);
         if (rp) world.rally.set(id, rp);
       }
@@ -122,8 +147,9 @@ export function loadWorld(db: Db, world: World): void {
       const c = corpseById.get(id);
       // No blocking / components — a corpse is just a decaying marker. The decay
       // system removes it once age reaches CORPSE_TTL_S.
+      const ck = (c?.unit_kind as EntityKind) ?? 'villager';
       world.corpses.set(id, {
-        unitKind: (c?.unit_kind as EntityKind) ?? 'villager',
+        unitKind: LEGACY_KIND[ck] ?? ck,
         team: c?.team ?? null,
         age: c?.age ?? 0,
       });

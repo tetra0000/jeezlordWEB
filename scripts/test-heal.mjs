@@ -1,11 +1,11 @@
-// In-process test of the healing system (no server needed): units regen in
+﻿// In-process test of the healing system (no server needed): units regen in
 // their own territory at HEAL_RATE_PER_S, units outside don't, buildings don't,
 // and healing clamps at maxHp. Runs against the built dist/ modules.
 import { World } from '../dist/server/sim/world.js';
 import { spawnUnit, spawnBuilding } from '../dist/server/sim/spawn.js';
 import { healSystem } from '../dist/server/sim/systems/heal.js';
 import { TILE } from '../dist/shared/constants.js';
-import { HEAL_RATE_PER_S } from '../dist/shared/stats.js';
+import { HEAL_RATE_PER_S, maxHpOf } from '../dist/shared/stats.js';
 
 const results = [];
 const check = (n, c, x = '') => { results.push(c); console.log(`${c ? 'PASS' : 'FAIL'}: ${n} ${x}`); };
@@ -17,10 +17,10 @@ world.players.set(1, { id: 1, name: 't', color: 1, spawnTileX: 50, spawnTileY: 5
 const tcId = spawnBuilding(world, 'townCenter', 1, 50, 50, false);
 
 // A unit inside territory, and one far outside it.
-const inside = spawnUnit(world, 'infantry', 1, 50 * TILE, 53 * TILE);
-const outside = spawnUnit(world, 'infantry', 1, 200 * TILE, 200 * TILE);
+const inside = spawnUnit(world, 'warrior', 1, 50 * TILE, 53 * TILE);
+const outside = spawnUnit(world, 'warrior', 1, 200 * TILE, 200 * TILE);
 
-world.health.get(inside).hp = 10;   // maxHp 45
+world.health.get(inside).hp = 10;
 world.health.get(outside).hp = 10;
 world.health.get(tcId).hp = 500;    // maxHp 1000
 
@@ -32,8 +32,9 @@ check('unit outside territory did NOT heal', world.health.get(outside).hp === 10
 check('building did NOT heal', world.health.get(tcId).hp === 500, `hp=${world.health.get(tcId).hp}`);
 
 // Heal a long time -> clamps at maxHp, never overshoots.
-for (let i = 0; i < 120; i++) healSystem(world, 60); // +120 hp worth, capped at 45
-check('healing clamps at maxHp', world.health.get(inside).hp === 45, `hp=${world.health.get(inside).hp}`);
+const cap = maxHpOf('warrior');
+for (let i = 0; i < 200; i++) healSystem(world, 60); // way more than enough, capped at maxHp
+check('healing clamps at maxHp', world.health.get(inside).hp === cap, `hp=${world.health.get(inside).hp}/${cap}`);
 
 const failed = results.filter((c) => !c).length;
 console.log(`\n${failed === 0 ? 'ALL PASS' : failed + ' FAILED'} (${results.length} checks)`);

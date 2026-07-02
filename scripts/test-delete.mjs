@@ -1,4 +1,4 @@
-// Verify unit deletion: a deleted own unit is removed, population drops, and NO
+﻿// Verify unit deletion: a deleted own unit is removed, population drops, and NO
 // resources are refunded. Run against a running server.
 import WebSocket from 'ws';
 const ws = new WebSocket('ws://localhost:8081/ws');
@@ -8,7 +8,7 @@ const send = (m) => ws.send(JSON.stringify(m));
 const own = () => [...ents.values()].filter((e) => e.owner === pid && e.kind !== 'townCenter'
   && !['tree','gold','stone','berry'].includes(e.kind) && e.x != null);
 const ownUnits = () => [...ents.values()].filter((e) => e.owner === pid
-  && ['villager','scout','infantry','archer','cavalry','horse','catapult'].includes(e.kind));
+  && ['villager','scoutCavalry','warrior','archer','knight','horseArcher','catapult'].includes(e.kind));
 const results = [];
 const check = (n, c, x = '') => { results.push(c); console.log(`${c ? 'PASS' : 'FAIL'}: ${n} ${x}`); };
 

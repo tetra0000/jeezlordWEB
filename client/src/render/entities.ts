@@ -5,7 +5,7 @@
 // effect particles. Positions interpolate toward the authoritative target.
 import { Container, Graphics, Point, Sprite, Text } from 'pixi.js';
 import { TILE } from '../../../shared/constants.js';
-import { BUILDING_STATS, TERRITORY_MAX_TILES, isBuilding, isResourceNode } from '../../../shared/stats.js';
+import { BUILDING_STATS, TERRITORY_MAX_TILES, UNIT_STATS, isBuilding, isResourceNode, squadMen } from '../../../shared/stats.js';
 import type { Action, EntityId, EntityKind, PlayerId, ProjectileKind } from '../../../shared/types.js';
 import type { ClientState } from '../state.js';
 import { ownerColor } from './colors.js';
@@ -23,6 +23,12 @@ export interface Viewport {
 interface Sprite_ {
   node: Container;
   body: Sprite;
+  // Squad rendering: military squads draw one small figure per soldier. `body`
+  // is figures[0]; each figure keeps its formation offset in figureOffs and its
+  // own animation phase. Figures beyond the squad's surviving men are hidden.
+  figures: Sprite[];
+  figureOffs: Array<{ x: number; y: number }>;
+  menShown: number; // last drawn surviving-men count (-1 = not a squad)
   // Overlay graphics are created lazily and skipped entirely for resource nodes
   // (the bulk of the world): they're never selected, damaged, or built/trained,
   // so they need none of these — saving 4 Graphics per node under admin reveal.
@@ -76,6 +82,15 @@ interface Ping {
 const INTERP_RATE = 12;
 const UNIT_SIZE = 26;
 const RESOURCE_SIZE = 28;
+// A squad's individual soldiers draw smaller than a lone unit, spread in a tight
+// formation around the entity position (2x2 for foot squads, side-by-side pairs
+// for cavalry). Offsets are slightly ragged so it reads as men, not a grid.
+const FIGURE_SIZE = 19;
+const SQUAD_OFFSETS: Record<number, Array<{ x: number; y: number }>> = {
+  2: [{ x: -7, y: 1 }, { x: 7, y: -2 }],
+  3: [{ x: -8, y: -5 }, { x: 8, y: -3 }, { x: 0, y: 7 }],
+  4: [{ x: -7, y: -7 }, { x: 8, y: -5 }, { x: -6, y: 7 }, { x: 7, y: 8 }],
+};
 
 function displaySize(kind: EntityKind): number {
   if (isBuilding(kind)) return BUILDING_STATS[kind].footprint * TILE;
@@ -303,17 +318,29 @@ export class EntityLayer {
         }
     }
 
-    const body = new Sprite(tex[texKind]);
-    body.anchor.set(0.5, 0.5);
-    body.width = size;
-    body.height = size;
-    if (isCorpse) {
-      body.tint = corpseTint(e.view.corpse?.team ?? null);
-      body.rotation = Math.PI / 2; // lying down
-    } else if (isBuilding(kind) || !resource) {
-      body.tint = ownerColor(e.view.owner);
+    // Military squads render one figure per soldier; everything else is a single
+    // body sprite. (A corpse is always a single fallen figure, even for squads.)
+    const squad = !isCorpse && !resource && !isBuilding(kind) ? (UNIT_STATS[kind]?.squad ?? 1) : 1;
+    const figures: Sprite[] = [];
+    const figureOffs = squad > 1 ? SQUAD_OFFSETS[squad] ?? [] : [{ x: 0, y: 0 }];
+    for (let i = 0; i < Math.max(1, squad); i++) {
+      const fig = new Sprite(tex[texKind]);
+      fig.anchor.set(0.5, 0.5);
+      const fsize = squad > 1 ? FIGURE_SIZE : size;
+      fig.width = fsize;
+      fig.height = fsize;
+      const off = figureOffs[i] ?? { x: 0, y: 0 };
+      fig.position.set(off.x, off.y);
+      if (isCorpse) {
+        fig.tint = corpseTint(e.view.corpse?.team ?? null);
+        fig.rotation = Math.PI / 2; // lying down
+      } else if (isBuilding(kind) || !resource) {
+        fig.tint = ownerColor(e.view.owner);
+      }
+      node.addChild(fig);
+      figures.push(fig);
     }
-    node.addChild(body);
+    const body = figures[0];
 
     let ring: Graphics | undefined;
     let hpBg: Graphics | undefined;
@@ -350,7 +377,8 @@ export class EntityLayer {
     node.zIndex = zIndexFor(kind);
     this.container.addChild(node);
     const s: Sprite_ = {
-      node, body, ring, hpBg, hpFg, prog, label, half,
+      node, body, figures, figureOffs, menShown: squad > 1 ? squad : -1,
+      ring, hpBg, hpFg, prog, label, half,
       phase: (id * 1.7) % 6.283, fxTimer: 0, hpShown: false, hpRatio: -1, progKey: '',
     };
     this.sprites.set(id, s);
@@ -439,41 +467,47 @@ export class EntityLayer {
       });
   }
 
-  // Apply the per-action animation to a unit's body sprite (transforms only).
+  // Apply the per-action animation to a unit's figures (transforms only). Each
+  // squad figure animates around its formation offset with its own phase, so a
+  // fighting squad reads as several men swinging out of step.
   private animate(s: Sprite_, action: Action | undefined, dt: number): void {
-    const b = s.body;
-    b.rotation = 0;
-    b.x = 0;
-    b.y = 0;
-    const ph = this.t * 1000 + s.phase * 200;
-    const fast = ph / 90;
-    switch (action) {
-      case 'gatherWood':
-        b.rotation = Math.sin(fast) * 0.5; // chopping swing
-        break;
-      case 'gatherGold':
-      case 'gatherStone':
-        b.y = -Math.abs(Math.sin(fast)) * 4; // pickaxe up/down
-        b.rotation = Math.sin(fast) * 0.12;
-        break;
-      case 'gatherFood':
-        b.y = Math.sin(fast * 0.6) * 2; // gentle picking bob
-        break;
-      case 'build':
-        b.y = -Math.abs(Math.sin(fast)) * 3; // hammering
-        b.rotation = Math.sin(fast) * 0.1;
-        break;
-      case 'attack': {
-        const l = Math.max(0, Math.sin(fast)); // lunge pulse
-        b.y = -l * 3;
-        b.rotation = Math.sin(fast * 1.3) * 0.18;
-        break;
+    for (let i = 0; i < s.figures.length; i++) {
+      const b = s.figures[i];
+      const off = s.figureOffs[i] ?? { x: 0, y: 0 };
+      b.rotation = 0;
+      b.x = off.x;
+      b.y = off.y;
+      const ph = this.t * 1000 + s.phase * 200 + i * 137;
+      const fast = ph / 90;
+      switch (action) {
+        case 'gatherWood':
+          b.rotation = Math.sin(fast) * 0.5; // chopping swing
+          break;
+        case 'gatherGold':
+        case 'gatherStone':
+          b.y = off.y - Math.abs(Math.sin(fast)) * 4; // pickaxe up/down
+          b.rotation = Math.sin(fast) * 0.12;
+          break;
+        case 'gatherFood':
+          b.y = off.y + Math.sin(fast * 0.6) * 2; // gentle picking bob
+          break;
+        case 'build':
+          b.y = off.y - Math.abs(Math.sin(fast)) * 3; // hammering
+          b.rotation = Math.sin(fast) * 0.1;
+          break;
+        case 'attack': {
+          const l = Math.max(0, Math.sin(fast)); // lunge pulse
+          b.y = off.y - l * 3;
+          b.rotation = Math.sin(fast * 1.3) * 0.18;
+          break;
+        }
+        case 'move':
+          b.rotation = Math.sin(fast * 0.7) * 0.12; // waddle
+          if (s.figures.length > 1) b.y = off.y + Math.sin(fast * 0.7) * 1.5; // marching bob
+          break;
+        default:
+          break;
       }
-      case 'move':
-        b.rotation = Math.sin(fast * 0.7) * 0.12; // waddle
-        break;
-      default:
-        break;
     }
     // Spawn work particles + a looped, positional work sound on the same
     // cadence (the sound engine throttles per-name, so a crowd stays a rhythm).
@@ -539,6 +573,15 @@ export class EntityLayer {
 
       const building = e.view.build;
       s.node.alpha = building != null ? 0.45 + 0.45 * building : 1;
+
+      // Squads: hide the figures of fallen men (the hp pool maps to men standing).
+      if (s.menShown >= 0) {
+        const men = squadMen(v.kind, v.hp, v.maxHp);
+        if (men !== s.menShown) {
+          s.menShown = men;
+          for (let i = 0; i < s.figures.length; i++) s.figures[i].visible = i < men;
+        }
+      }
 
       if (!isBuilding(e.view.kind) && !isResourceNode(e.view.kind)) {
         this.animate(s, e.view.action, dtSeconds);
