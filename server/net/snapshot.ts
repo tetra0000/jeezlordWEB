@@ -4,9 +4,9 @@
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
 import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
-import type { EntityId, EntityView, JobReport, Pop, Shot, Stockpile, Vec2 } from '../../shared/types.js';
+import type { DiploEntry, EntityId, EntityView, JobReport, Pop, Shot, Stockpile, Vec2 } from '../../shared/types.js';
 import type { Session } from './session.js';
-import type { World } from '../sim/world.js';
+import { World } from '../sim/world.js';
 import { MAP_TILES, TILE } from '../../shared/constants.js';
 import { isResourceNode } from '../../shared/stats.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
@@ -52,6 +52,12 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
 // Out-of-vision ENEMY entities are never serialized (the anti-cheat boundary).
 function visibleViews(world: World, playerId: number): Map<EntityId, EntityView> {
   const visTiles = visibleTileSet(world, playerId);
+  // Allies share vision (the Neptune's-Pride-style intel perk of an alliance):
+  // union the allies' visible tiles into ours. Still the single enforcement
+  // point — the visible SET grows, but the boundary rule is unchanged.
+  for (const ally of world.allies(playerId)) {
+    for (const t of visibleTileSet(world, ally)) visTiles.add(t);
+  }
   // Admin reveal: lift the fog entirely for this player (still the single
   // enforcement point — we just treat every tile as in-vision below).
   const reveal = world.adminReveal.has(playerId);
@@ -166,6 +172,29 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     session.lastMarket = mkKey;
   }
 
+  // Diplomacy roster: your relation (+ pending offers) with every other player.
+  // Small, so it's rebuilt each tick and sent only when its key changes.
+  let diplo: DiploEntry[] | undefined;
+  {
+    const roster: DiploEntry[] = [];
+    for (const [pid, pl] of world.players) {
+      if (pid === playerId) continue;
+      const entry: DiploEntry = {
+        id: pid, name: pl.name, color: pl.color,
+        relation: world.relationOf(playerId, pid),
+      };
+      const proposer = world.diploOffers.get(World.pairKey(playerId, pid));
+      if (proposer != null) entry.offer = proposer === playerId ? 'out' : 'in';
+      roster.push(entry);
+    }
+    roster.sort((a, b) => a.id - b.id);
+    const dKey = JSON.stringify(roster);
+    if (dKey !== session.lastDiplo) {
+      diplo = roster;
+      session.lastDiplo = dKey;
+    }
+  }
+
   // Defeat state (no units left, none training) — sent only when it flips.
   let defeated: boolean | undefined;
   const defeatedNow = !world.isAlive(playerId);
@@ -184,7 +213,7 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   }
 
   if (enter.length === 0 && update.length === 0 && leave.length === 0 &&
-      !you && !pop && !jobs && !market && defeated === undefined && !shots)
+      !you && !pop && !jobs && !market && defeated === undefined && !shots && !diplo)
     return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
   if (dead.length) delta.dead = dead;
@@ -194,5 +223,6 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   if (market) delta.market = market;
   if (defeated !== undefined) delta.defeated = defeated;
   if (shots) delta.shots = shots;
+  if (diplo) delta.diplo = diplo;
   return delta;
 }

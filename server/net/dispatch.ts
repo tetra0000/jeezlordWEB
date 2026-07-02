@@ -40,7 +40,7 @@ import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/moveme
 import { killEntity } from '../sim/systems/combat.js';
 import { spawnBuilding } from '../sim/spawn.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
-import type { World } from '../sim/world.js';
+import { World } from '../sim/world.js';
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -324,7 +324,11 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     case 'attack': {
       const targetId = msg.targetId;
       const targetOwner = world.owner.get(targetId);
-      if (targetOwner == null || targetOwner === playerId) return; // only enemies
+      if (targetOwner == null || targetOwner === playerId) return; // only other players
+      // Diplomacy: you can only attack players you are at war with. War must be
+      // declared openly first (in the diplomacy menu) — no sneak attacks.
+      if (world.relationOf(playerId, targetOwner) !== 'war')
+        return session.reject('you are not at war — declare war in the diplomacy menu first');
       const ttf = world.transform.get(targetId);
       if (!ttf) return;
       for (const id of msg.unitIds) {
@@ -381,6 +385,39 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'farm') return;
       world.farmAuto.set(id, !!msg.on);
       world.markDirty(id);
+      return;
+    }
+
+    case 'diplomacy': {
+      const other = msg.playerId;
+      if (other === playerId || !world.players.has(other)) return session.reject('unknown player');
+      const rel = world.relationOf(playerId, other);
+      const key = World.pairKey(playerId, other);
+      switch (msg.action) {
+        case 'declareWar': {
+          if (rel === 'war') return;
+          world.setRelation(playerId, other, 'war');
+          break;
+        }
+        case 'propose': {
+          // Step the relation up one notch: neutral -> ally, war -> neutral.
+          if (rel === 'ally') return; // nothing above ally
+          const proposer = world.diploOffers.get(key);
+          if (proposer != null && proposer !== playerId) {
+            // The other side already proposed — this accepts.
+            world.setRelation(playerId, other, rel === 'war' ? 'neutral' : 'ally');
+          } else if (proposer == null) {
+            world.diploOffers.set(key, playerId);
+            world.diploDirty = true;
+          }
+          break;
+        }
+        case 'breakAlliance': {
+          if (rel !== 'ally') return;
+          world.setRelation(playerId, other, 'neutral');
+          break;
+        }
+      }
       return;
     }
 

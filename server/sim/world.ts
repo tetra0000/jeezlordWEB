@@ -1,7 +1,7 @@
 // The authoritative world: entity/component store, tile-occupancy grid, and
 // player registry. Sim systems mutate this; persistence flushes it; snapshots
 // read from it. In-RAM is the source of truth at runtime.
-import type { Action, EntityId, EntityKind, EntityView, PlayerId, ProjectileKind } from '../../shared/types.js';
+import type { Action, EntityId, EntityKind, EntityView, PlayerId, ProjectileKind, Relation } from '../../shared/types.js';
 import { MAP_TILES, TILE, TERRAIN_WATER, TERRAIN_MOUNTAIN } from '../../shared/constants.js';
 import {
   BASE_POP_CAP,
@@ -66,6 +66,40 @@ export class World {
   // shared economy: trades move these, and marketSystem drifts them back toward
   // 1.0. Persisted in world_meta.
   readonly market = { wood: 1, food: 1, stone: 1 };
+
+  // Diplomacy: relation per unordered player pair (absent = neutral), plus at
+  // most one pending step-up proposal per pair (neutral->ally or war->neutral)
+  // recorded as the proposer's id. Persisted in the `diplomacy` table;
+  // `diploDirty` flags the whole (small) set for rewrite on the next flush.
+  readonly relations = new Map<string, Relation>();
+  readonly diploOffers = new Map<string, PlayerId>();
+  diploDirty = false;
+
+  static pairKey(a: PlayerId, b: PlayerId): string {
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+  }
+  relationOf(a: PlayerId, b: PlayerId): Relation {
+    if (a === b) return 'ally'; // you are always your own friend
+    return this.relations.get(World.pairKey(a, b)) ?? 'neutral';
+  }
+  setRelation(a: PlayerId, b: PlayerId, rel: Relation): void {
+    const key = World.pairKey(a, b);
+    if (rel === 'neutral') this.relations.delete(key);
+    else this.relations.set(key, rel);
+    this.diploOffers.delete(key); // any transition clears the pending proposal
+    this.diploDirty = true;
+  }
+  // Players currently allied with `pid` (for shared vision).
+  allies(pid: PlayerId): PlayerId[] {
+    const out: PlayerId[] = [];
+    for (const [key, rel] of this.relations) {
+      if (rel !== 'ally') continue;
+      const [a, b] = key.split(':').map(Number);
+      if (a === pid) out.push(b);
+      else if (b === pid) out.push(a);
+    }
+    return out;
+  }
 
   // Resource nodes each player has discovered (entered vision once). Discovered
   // nodes stay visible through fog (AoE-style "explored" memory). In-memory only

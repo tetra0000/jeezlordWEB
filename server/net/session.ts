@@ -34,6 +34,7 @@ export class Session {
   lastJobs = '';
   lastMarket = ''; // last market-price key sent (so we only resend on change)
   lastDefeated = false; // last defeat state sent (sent only when it flips)
+  lastDiplo = ''; // last diplomacy-roster key sent (so we only resend on change)
 
   constructor(readonly ws: WebSocket) {}
 
@@ -228,6 +229,7 @@ function sendInit(ctx: GameContext, session: Session, playerId: PlayerId): void 
   session.lastJobs = '';
   session.lastMarket = '';
   session.lastDefeated = false;
+  session.lastDiplo = '';
 }
 
 // Defeat restart: wipe everything the player still owns, reset their economy and
@@ -244,6 +246,17 @@ export function restartPlayer(ctx: GameContext, session: Session, playerId: Play
   p.jobDesired = {};
   world.markPlayerDirty(playerId);
   world.discoveredResources.delete(playerId);
+
+  // A fresh life starts diplomatically clean: every relation and pending offer
+  // involving this player reverts to neutral (old wars don't follow them).
+  for (const key of [...world.relations.keys(), ...world.diploOffers.keys()]) {
+    const [a, b] = key.split(':').map(Number);
+    if (a === playerId || b === playerId) {
+      world.relations.delete(key);
+      world.diploOffers.delete(key);
+      world.diploDirty = true;
+    }
+  }
 
   const spawn = findSpawnTile(world);
   p.spawnTileX = spawn.x;

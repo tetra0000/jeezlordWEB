@@ -35,7 +35,7 @@ import type { EntityKind } from '../../../shared/types.js';
 import type { GameRenderer } from '../render/app.js';
 import type { ClientState } from '../state.js';
 import type { Net } from '../net.js';
-import { KIND_STYLE } from '../render/colors.js';
+import { KIND_STYLE, ownerColor } from '../render/colors.js';
 import { sound, panAt } from '../audio/sound.js';
 
 const DRAG_THRESHOLD = 5;
@@ -148,6 +148,10 @@ export class Input {
   private renameId: number | null = null;
   private readonly confirmModal = document.getElementById('confirm-modal')!;
   private confirmAction: (() => void) | null = null;
+  private readonly diploModal = document.getElementById('diplo-modal')!;
+  private readonly diploList = document.getElementById('diplo-list')!;
+  private readonly diploBtn = document.getElementById('diplo-btn')!;
+  private diploKey = '';
   // True while hovering a DOM control with its own tooltip (setTip). Stops the
   // canvas hover handler (updateTooltip) from hiding/overwriting it on every move.
   private uiTipActive = false;
@@ -206,6 +210,17 @@ export class Input {
     document.getElementById('confirm-cancel')!.addEventListener('click', () => this.closeConfirm());
     this.confirmModal.addEventListener('pointerdown', (e) => {
       if (e.target === this.confirmModal) this.closeConfirm();
+    });
+
+    // Diplomacy menu.
+    this.diploBtn.addEventListener('click', () => {
+      this.diploModal.classList.remove('hidden');
+      this.diploKey = ''; // force a re-render
+      this.renderDiplo();
+    });
+    document.getElementById('diplo-close')!.addEventListener('click', () => this.diploModal.classList.add('hidden'));
+    this.diploModal.addEventListener('pointerdown', (e) => {
+      if (e.target === this.diploModal) this.diploModal.classList.add('hidden');
     });
 
     canvas.addEventListener('pointerdown', (e) => {
@@ -371,7 +386,11 @@ export class Input {
     }
 
     const pan = panAt(cx);
-    if (target && target.view.owner != null && target.view.owner !== this.state.playerId) {
+    // Right-click on another player's entity attacks only if you're AT WAR with
+    // them (diplomacy). A neutral/allied target is just ground to walk to.
+    const atWar = target && target.view.owner != null && target.view.owner !== this.state.playerId
+      && this.state.relationTo(target.view.owner) === 'war';
+    if (target && atWar) {
       this.net.send({ t: 'attack', unitIds: ids, targetId: target.view.id });
       sound.play('attackCmd', { pan });
       this.r.entities.ping(target.view.x, target.view.y, 0xff5a5a);
@@ -574,6 +593,7 @@ export class Input {
     this.updateAdminPanel();
     this.updateVillagerPanel();
     this.updateStancePanel();
+    this.renderDiplo();
     if (this.toastTimer > 0 && (this.toastTimer -= 1) === 0) this.toastEl.classList.remove('show');
   }
 
@@ -632,6 +652,69 @@ export class Input {
         const job = (btn as HTMLElement).dataset.job as VillagerJob;
         const cur = this.state.jobs?.counts[job] ?? 0;
         this.net.send({ t: 'assignJob', job, count: Math.max(0, cur - 1) });
+      });
+    }
+  }
+
+  // --- diplomacy menu ---------------------------------------------------------
+  // The button glows while an incoming proposal is pending; the modal lists
+  // every other player with their relation + the applicable actions. Re-rendered
+  // (cheaply, key-guarded) every frame so it tracks live roster changes even
+  // while open.
+  private renderDiplo(): void {
+    const roster = this.state.diplo ?? [];
+    const hasIncoming = roster.some((d) => d.offer === 'in');
+    const open = !this.diploModal.classList.contains('hidden');
+    const key = `${open}|${hasIncoming}|` + roster.map((d) => `${d.id}:${d.relation}:${d.offer ?? ''}`).join(',');
+    if (key === this.diploKey) return;
+    this.diploKey = key;
+    this.diploBtn.classList.toggle('alert', hasIncoming);
+    this.diploBtn.textContent = hasIncoming ? '🤝 Diplomacy !' : '🤝 Diplomacy';
+    if (!open) return;
+
+    if (roster.length === 0) {
+      this.diploList.innerHTML = `<div class="dp-empty">No other players known yet. Others appear here when they join the world.</div>`;
+      return;
+    }
+    const relLabel = (d: (typeof roster)[number]): string =>
+      d.relation === 'war' ? 'AT WAR' : d.relation === 'ally' ? 'ALLIED' : 'neutral';
+    const rows = roster.map((d) => {
+      const color = `#${ownerColor(d.id).toString(16).padStart(6, '0')}`;
+      const btns: string[] = [];
+      if (d.relation === 'neutral') {
+        if (d.offer === 'in') btns.push(`<button class="dp-btn good" data-act="propose" data-pid="${d.id}">Accept alliance</button>`);
+        else if (d.offer === 'out') btns.push(`<button class="dp-btn" disabled>Alliance offered…</button>`);
+        else btns.push(`<button class="dp-btn good" data-act="propose" data-pid="${d.id}">Offer alliance</button>`);
+        btns.push(`<button class="dp-btn war" data-act="declareWar" data-pid="${d.id}">Declare war</button>`);
+      } else if (d.relation === 'war') {
+        if (d.offer === 'in') btns.push(`<button class="dp-btn good" data-act="propose" data-pid="${d.id}">Accept peace</button>`);
+        else if (d.offer === 'out') btns.push(`<button class="dp-btn" disabled>Peace offered…</button>`);
+        else btns.push(`<button class="dp-btn good" data-act="propose" data-pid="${d.id}">Offer peace</button>`);
+      } else {
+        btns.push(`<button class="dp-btn war" data-act="breakAlliance" data-pid="${d.id}">Break alliance</button>`);
+      }
+      return `<div class="dp-row">`
+        + `<span class="dp-dot" style="background:${color}"></span>`
+        + `<span class="dp-name">${escapeHtml(d.name)}</span>`
+        + `<span class="dp-rel ${d.relation}">${relLabel(d)}</span>`
+        + btns.join('')
+        + `</div>`;
+    });
+    this.diploList.innerHTML = rows.join('');
+    for (const btn of this.diploList.querySelectorAll('.dp-btn[data-act]')) {
+      btn.addEventListener('click', () => {
+        const el = btn as HTMLElement;
+        const action = el.dataset.act as 'declareWar' | 'propose' | 'breakAlliance';
+        const pid = Number(el.dataset.pid);
+        const name = roster.find((d) => d.id === pid)?.name ?? 'them';
+        if (action === 'declareWar') {
+          this.askConfirm('Declare war?', `Openly declare war on ${name}? Both sides' armies and towers will attack each other on sight. Getting back to peace needs BOTH of you to agree.`, () => {
+            this.net.send({ t: 'diplomacy', action, playerId: pid });
+          });
+        } else {
+          this.net.send({ t: 'diplomacy', action, playerId: pid });
+          sound.play('click');
+        }
       });
     }
   }
@@ -819,6 +902,17 @@ export class Input {
     this.confirmModal.classList.add('hidden');
   }
 
+  // Who owns an entity, diplomacy-aware: "you", "neutral" (gaia), or the other
+  // player's name with your relation to them.
+  private whoLabel(owner: number | null): string {
+    if (owner === this.state.playerId) return 'you';
+    if (owner == null) return 'neutral';
+    const name = this.state.playerName(owner);
+    const rel = this.state.relationTo(owner);
+    const relTxt = rel === 'war' ? 'at war' : rel === 'ally' ? 'ally' : 'neutral';
+    return name ? `${escapeHtml(name)} · ${relTxt}` : `player ${owner} · ${relTxt}`;
+  }
+
   private hpBar(hp: number, maxHp: number): string {
     const ratio = maxHp > 0 ? Math.max(0, hp / maxHp) : 0;
     const col = ratio > 0.5 ? '#4ad96a' : ratio > 0.25 ? '#d9c14a' : '#d94a4a';
@@ -833,7 +927,7 @@ export class Input {
     const owned = v.owner === this.state.playerId;
     // Town centers show their player-given name (if any) as the title.
     const title = v.kind === 'townCenter' && v.name ? escapeHtml(v.name) : (LABEL[v.kind] ?? v.kind);
-    const who = owned ? 'you' : v.owner == null ? 'neutral' : 'enemy';
+    const who = this.whoLabel(v.owner);
 
     const parts = [`<div class="ip-title">${title}</div>`, `<div class="ip-sub">${who}</div>`];
     parts.push(this.hpBar(v.hp, v.maxHp));
@@ -1060,7 +1154,7 @@ export class Input {
     } else if (RES_TYPE[v.kind]) {
       sub = `${v.amount ?? '?'} ${RES_TYPE[v.kind]} left`;
     } else {
-      const who = v.owner === this.state.playerId ? 'you' : v.owner == null ? 'neutral' : 'enemy';
+      const who = this.whoLabel(v.owner);
       const lines = [`${who} · ${Math.ceil(v.hp)}/${v.maxHp} hp`];
       const sq = UNIT_STATS[v.kind]?.squad ?? 1;
       if (sq > 1) lines.push(`${squadMen(v.kind, v.hp, v.maxHp)}/${sq} soldiers`);

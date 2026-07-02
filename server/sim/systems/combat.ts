@@ -21,8 +21,10 @@ import { applyBuildingFootprint, spawnCorpse } from '../spawn.js';
 
 function isEnemyOf(world: World, owner: PlayerId, targetId: EntityId): boolean {
   const to = world.owner.get(targetId);
-  if (to == null) return false; // neutral / resource nodes are never auto-attacked
-  return to !== owner;
+  if (to == null) return false; // gaia / resource nodes are never auto-attacked
+  // Diplomacy: only players you are AT WAR with are enemies. Neutral players'
+  // units never auto-engage each other; allies obviously don't either.
+  return to !== owner && world.relationOf(owner, to) === 'war';
 }
 
 // Remove a dead entity, unblocking its footprint if it occupied tiles. A dying
@@ -53,6 +55,7 @@ function acquireTarget(world: World, id: EntityId, owner: PlayerId, range: numbe
   let bestD = range;
   for (const [other, otherOwner] of world.owner) {
     if (otherOwner == null || otherOwner === owner) continue;
+    if (world.relationOf(owner, otherOwner) !== 'war') continue; // diplomacy: war only
     const otf = world.transform.get(other);
     if (!otf) continue;
     const d = Math.hypot(otf.x - tf.x, otf.y - tf.y);

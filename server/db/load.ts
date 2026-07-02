@@ -164,6 +164,13 @@ export function loadWorld(db: Db, world: World): void {
     }
   }
 
+  // Diplomacy relations + pending proposals.
+  for (const d of h.prepare('SELECT a, b, state, proposer FROM diplomacy').all() as Array<{ a: number; b: number; state: string; proposer: number | null }>) {
+    const key = `${d.a}:${d.b}`;
+    if (d.state === 'ally' || d.state === 'war') world.relations.set(key, d.state);
+    if (d.proposer != null) world.diploOffers.set(key, d.proposer);
+  }
+
   const stored = db.getMeta('next_entity_id');
   if (stored) world.setNextId(Number(stored));
 

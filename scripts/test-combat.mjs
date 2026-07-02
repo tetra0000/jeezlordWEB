@@ -49,6 +49,12 @@ const enemyAtSpawn = [...A.ents.values()].filter((e) => e.owner != null && e.own
 check('anti-cheat: A cannot see B at spawn', enemyAtSpawn.length === 0, `saw ${enemyAtSpawn.length}`);
 check('A and B are distinct players', A.pid !== B.pid && A.pid > 0 && B.pid > 0, `pids ${A.pid},${B.pid}`);
 
+// Diplomacy: players start NEUTRAL and cannot fight until war is declared.
+// B declares war on A (unilateral + immediate), which also exercises the
+// diplomacy intent end-to-end.
+send(B, { t: 'diplomacy', action: 'declareWar', playerId: A.pid });
+await new Promise((r) => setTimeout(r, 400));
+
 // (2)+(3): A holds in its open, cleared base and auto-defends; B marches its
 // whole army onto A's position and attacks. One side stationary avoids the
 // equal-speed mutual-chase that can prevent slow units from ever meleeing.

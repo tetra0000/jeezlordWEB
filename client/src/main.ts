@@ -75,6 +75,31 @@ function emitDeltaSounds(state: ClientState, msg: DeltaMsg, r: GameRenderer): vo
   }
 }
 
+// Diplomacy events: diff the incoming roster against the one we still hold
+// (call BEFORE applyDelta) and surface relation changes / incoming offers as
+// toasts. `showDiploToast` is bound once the Input exists.
+let showDiploToast: ((msg: string) => void) | null = null;
+function emitDiploToasts(state: ClientState, msg: DeltaMsg): void {
+  if (!msg.diplo || !showDiploToast) return;
+  const old = new Map((state.diplo ?? []).map((d) => [d.id, d]));
+  for (const d of msg.diplo) {
+    const prev = old.get(d.id);
+    const was = prev?.relation ?? 'neutral';
+    if (d.relation !== was) {
+      if (d.relation === 'war') showDiploToast(`⚔ WAR! ${d.name} and you are now at war`);
+      else if (d.relation === 'ally') showDiploToast(`🤝 Alliance formed with ${d.name}`);
+      else if (was === 'war') showDiploToast(`🕊 Peace with ${d.name}`);
+      else showDiploToast(`💔 Alliance with ${d.name} has ended`);
+      sound.play(d.relation === 'war' ? 'error' : 'complete');
+    } else if (d.offer === 'in' && prev?.offer !== 'in') {
+      showDiploToast(d.relation === 'war'
+        ? `🕊 ${d.name} offers peace — open Diplomacy to accept`
+        : `🤝 ${d.name} proposes an alliance — open Diplomacy to accept`);
+      sound.play('select');
+    }
+  }
+}
+
 async function boot(): Promise<void> {
   const loginOverlay = $('login');
   const hud = $('hud');
@@ -151,6 +176,7 @@ async function boot(): Promise<void> {
         break;
       case 'delta':
         emitDeltaSounds(state, msg, renderer);
+        emitDiploToasts(state, msg);
         state.applyDelta(msg);
         if (msg.you) Object.assign(state.stockpile, msg.you);
         if (msg.pop) state.pop = msg.pop;
@@ -175,6 +201,7 @@ async function boot(): Promise<void> {
   });
 
   input = new Input(renderer, state, net);
+  showDiploToast = (m) => input.showToast(m);
   const minimap = new Minimap(renderer, state, (wx, wy) => camera.centerOn(wx, wy));
   const perf = new PerfHud();
 

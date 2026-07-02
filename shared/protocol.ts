@@ -1,6 +1,7 @@
 // All WebSocket message shapes, shared by client and server so they never drift.
 // Discriminated unions on the `t` field. Pure data — no Node/DOM APIs.
 import type {
+  DiploEntry,
   EntityId,
   EntityKind,
   EntityView,
@@ -117,6 +118,18 @@ export interface FarmReseedMsg {
   on: boolean;
 }
 
+// Diplomacy action toward another player:
+//  - declareWar: unilateral and immediate, from any relation.
+//  - propose: step the relation up one notch — at neutral this offers an
+//    alliance, at war it offers peace. If the other side already proposed,
+//    this ACCEPTS and the new relation takes effect.
+//  - breakAlliance: unilateral ally -> neutral.
+export interface DiplomacyMsg {
+  t: 'diplomacy';
+  action: 'declareWar' | 'propose' | 'breakAlliance';
+  playerId: PlayerId; // the other player
+}
+
 // Set the stance of one or more owned military squads (how they auto-engage).
 export interface StanceMsg {
   t: 'stance';
@@ -176,6 +189,7 @@ export type ClientMsg =
   | RallyMsg
   | RenameMsg
   | FarmReseedMsg
+  | DiplomacyMsg
   | StanceMsg
   | StopMsg
   | DeleteMsg
@@ -232,6 +246,9 @@ export interface DeltaMsg {
   market?: MarketState; // global market price multipliers (sent when they change)
   defeated?: boolean; // you have no units left (sent when this flips) — offer restart
   shots?: Shot[]; // ranged projectiles loosed this tick that the player can see (cosmetic)
+  // Your diplomacy roster (relation + pending offers with every other player).
+  // Sent when it changes; the client diffs it for "X declared war!" toasts.
+  diplo?: DiploEntry[];
 }
 
 // Admin-mode state for the local player (whether the cheat panel is active, and

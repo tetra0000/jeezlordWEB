@@ -128,6 +128,16 @@ export function initSchema(db: DatabaseSync): void {
       age       REAL NOT NULL
     );
 
+    -- Diplomacy: relation per player pair (a < b), plus the pending step-up
+    -- proposal's proposer (NULL if none). Neutral pairs have no row.
+    CREATE TABLE IF NOT EXISTS diplomacy (
+      a        INTEGER NOT NULL,
+      b        INTEGER NOT NULL,
+      state    TEXT NOT NULL,
+      proposer INTEGER,
+      PRIMARY KEY (a, b)
+    );
+
     CREATE TABLE IF NOT EXISTS world_meta (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL

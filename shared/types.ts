@@ -59,6 +59,24 @@ export type Stance = 'aggressive' | 'defensive' | 'standGround' | 'noAttack';
 // destinations): a wide line abreast, a compact box, or a loose spread.
 export type Formation = 'line' | 'box' | 'loose';
 
+// Diplomacy. Every pair of players has a relation; everyone starts NEUTRAL
+// (units never auto-engage and cannot be ordered to attack). WAR is declared
+// unilaterally and openly; an ALLIANCE needs a proposal + acceptance. Getting
+// out of a war back to neutral likewise needs both sides (a peace offer).
+export type Relation = 'neutral' | 'ally' | 'war';
+
+// One row of the player's diplomacy roster (their relation with every other
+// player in the world). `offer` marks a pending step-up proposal on this pair:
+// 'in' = they proposed to you (you can accept), 'out' = you proposed to them.
+// At neutral the proposal means alliance; at war it means peace.
+export interface DiploEntry {
+  id: PlayerId;
+  name: string;
+  color: number;
+  relation: Relation;
+  offer?: 'in' | 'out';
+}
+
 // A projectile a ranged attacker visibly looses. Purely cosmetic — the sim
 // resolves the damage instantly; this just tells the client what to draw flying.
 export type ProjectileKind = 'arrow' | 'boulder';

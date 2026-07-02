@@ -116,6 +116,24 @@ export function flush(db: Db, world: World): void {
       }
     }
 
+    // Diplomacy: the whole set is tiny — rewrite it when anything changed.
+    if (world.diploDirty) {
+      h.exec('DELETE FROM diplomacy');
+      const upDiplo = h.prepare('INSERT INTO diplomacy (a, b, state, proposer) VALUES (?, ?, ?, ?)');
+      const rows = new Map<string, { state: string | null; proposer: number | null }>();
+      for (const [key, rel] of world.relations) rows.set(key, { state: rel, proposer: null });
+      for (const [key, proposer] of world.diploOffers) {
+        const row = rows.get(key);
+        if (row) row.proposer = proposer;
+        else rows.set(key, { state: 'neutral', proposer });
+      }
+      for (const [key, row] of rows) {
+        const [a, b] = key.split(':').map(Number);
+        upDiplo.run(a, b, row.state ?? 'neutral', row.proposer);
+      }
+      world.diploDirty = false;
+    }
+
     db.setMeta('next_entity_id', String(world.peekNextId()));
     // Global market price multipliers (small, drift continuously — write each flush).
     db.setMeta('market_wood', String(world.market.wood));

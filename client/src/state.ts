@@ -2,7 +2,7 @@
 // target positions) plus interpolated render positions, the local player's
 // identity/stockpile, and the current selection. Pure data — render and input
 // modules read/write this.
-import type { EntityView, EntityId, JobReport, PlayerId, Pop, Stockpile } from '../../shared/types.js';
+import type { DiploEntry, EntityView, EntityId, JobReport, PlayerId, Pop, Relation, Stockpile } from '../../shared/types.js';
 import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
 import { TILE } from '../../shared/constants.js';
 import { BUILDING_STATS, isBuilding } from '../../shared/stats.js';
@@ -46,11 +46,24 @@ export class ClientState {
   market: MarketState | null = null;
   // True when the server reports we have no units left (offer a restart).
   defeated = false;
+  // Diplomacy roster: our relation with every other player (from the delta).
+  diplo: DiploEntry[] | null = null;
+
+  // Relation with an entity owner ('ally' for self, 'neutral' if unknown).
+  relationTo(owner: PlayerId | null): Relation {
+    if (owner == null) return 'neutral';
+    if (owner === this.playerId) return 'ally';
+    return this.diplo?.find((d) => d.id === owner)?.relation ?? 'neutral';
+  }
+  playerName(owner: PlayerId): string | null {
+    return this.diplo?.find((d) => d.id === owner)?.name ?? null;
+  }
 
   applyDelta(d: DeltaMsg): void {
     if (d.jobs) this.jobs = d.jobs;
     if (d.market) this.market = d.market;
     if (d.defeated !== undefined) this.defeated = d.defeated;
+    if (d.diplo) this.diplo = d.diplo;
     for (const v of d.enter) {
       this.entities.set(v.id, { view: v, rx: v.x, ry: v.y });
     }
