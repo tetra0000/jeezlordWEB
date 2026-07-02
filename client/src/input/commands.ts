@@ -49,7 +49,7 @@ const LABEL: Record<string, string> = {
   tower: 'Tower', wall: 'Wall', villager: 'Villager',
   militia: 'Militia', warrior: 'Warriors', spearman: 'Spearmen', archer: 'Archers',
   longbowman: 'Longbowmen', scoutCavalry: 'Scout Cavalry', knight: 'Knights',
-  horseArcher: 'Horse Archers', catapult: 'Catapult',
+  horseArcher: 'Horse Archers', catapult: 'Catapult', caravan: 'Trade Caravan',
   tree: 'Tree', gold: 'Gold Mine', stone: 'Stone', berry: 'Berry Bush',
 };
 // One-line "what does this do" blurbs shown as hover tooltips on the build/train
@@ -79,6 +79,7 @@ const DESC: Record<string, string> = {
   knight: 'Squad of 2. Heavy shock cavalry: expensive, hits like a hammer. Fears spearmen.',
   horseArcher: 'Squad of 2. Mobile skirmishers: shoot, ride away, repeat.',
   catapult: 'Slow siege engine: huge damage, devastating against buildings.',
+  caravan: 'Defenceless trade wagon. Right-click a market to set a trade route: it shuttles gold home every trip. Another player’s market pays +50%.',
 };
 const RES_TYPE: Record<string, string> = { tree: 'wood', gold: 'gold', stone: 'stone', berry: 'food' };
 const MK_EMOJI: Record<string, string> = { wood: '🌲', food: '🍖', stone: '🪨' };
@@ -386,6 +387,20 @@ export class Input {
     }
 
     const pan = panAt(cx);
+    // Caravans right-clicked onto a market get a trade route; any other
+    // selected units fall through to the normal move/attack handling below.
+    if (target && target.view.kind === 'market') {
+      const caravans = ids.filter((id) => this.state.entities.get(id)?.view.kind === 'caravan');
+      if (caravans.length > 0) {
+        this.net.send({ t: 'trade', caravanIds: caravans, marketId: target.view.id });
+        this.showToast(`trade route set (${caravans.length} caravan${caravans.length === 1 ? '' : 's'})`);
+        sound.play('rally', { pan });
+        this.r.entities.ping(target.view.x, target.view.y, 0xffd24a);
+        const rest = ids.filter((id) => !caravans.includes(id));
+        if (rest.length > 0) this.net.send({ t: 'move', unitIds: rest, x: p.x, y: p.y, queue: this.shift, formation: this.formation });
+        return;
+      }
+    }
     // Right-click on another player's entity attacks only if you're AT WAR with
     // them (diplomacy). A neutral/allied target is just ground to walk to.
     const atWar = target && target.view.owner != null && target.view.owner !== this.state.playerId
@@ -951,6 +966,18 @@ export class Input {
     if (v.kind === 'villager' && v.job) {
       const jobName = JOB_LABEL[v.job].replace(/s$/, '');
       parts.push(`<div class="ip-row">🧰 job: ${jobName}</div>`);
+    }
+
+    // Caravan: the active trade route and its payout.
+    if (v.kind === 'caravan' && owned) {
+      if (v.trade) {
+        const targetMkt = this.state.entities.get(v.trade.target);
+        const whose = targetMkt ? this.whoLabel(targetMkt.view.owner) : (v.trade.foreign ? 'another player' : 'your own market');
+        parts.push(`<div class="ip-row">🛒 trading with ${whose}</div>`);
+        parts.push(`<div class="ip-row">🪙 ${v.trade.gold} gold per delivery${v.trade.foreign ? ' (+50% foreign bonus)' : ''}</div>`);
+      } else {
+        parts.push(`<div class="ip-row dim">No trade route — right-click a market. Another player’s market pays +50%.</div>`);
+      }
     }
 
     // Gather camp: its harvest radius (where its gatherers work). Not territory —

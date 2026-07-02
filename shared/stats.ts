@@ -95,7 +95,23 @@ export const UNIT_STATS: Record<string, UnitStat> = {
   // Mobile skirmishers: shoot on the move-ish (fast repositioning), fragile.
   horseArcher: { hp: 80, speed: 85, vision: 8, attack: 9, range: 120, attackCooldown: 1.7, trainTime: 40, trainedAt: 'stable', cost: { food: 60, wood: 30, gold: 50 }, pop: 3, squad: 2, uclass: 'cavalry' },
   catapult: { hp: 50, speed: 35, vision: 6, attack: 45, range: 220, attackCooldown: 4, trainTime: 80, trainedAt: 'barracks', cost: { wood: 160, gold: 80 }, pop: 3, squad: 1, uclass: 'siege' },
+  // Trade caravan: no attack at all (it never fights back — escort it). Shuttles
+  // between its home market and a target market, earning gold per delivery.
+  caravan: { hp: 80, speed: 55, vision: 5, attack: 0, range: 0, attackCooldown: 1, trainTime: 45, trainedAt: 'market', cost: { wood: 90, gold: 40 }, pop: 1, squad: 1, uclass: 'civilian' },
 };
+
+// --- trade caravans -----------------------------------------------------------
+// A caravan earns gold each time it comes home from the target market, scaled
+// by the route's length. Trading with ANOTHER player's market pays +50% — the
+// world economy rewards trading partners (and gives you a reason not to kill
+// everyone). Your own markets only count if they're far enough apart.
+export const CARAVAN_GOLD_PER_TILE = 1.0; // gold per tile of (one-way) route length
+export const CARAVAN_FOREIGN_BONUS = 1.5; // multiplier when the target market is another player's
+export const CARAVAN_MIN_OWN_TRADE_TILES = 40; // own-market routes must be at least this long
+
+export function caravanGold(distTiles: number, foreign: boolean): number {
+  return Math.max(1, Math.round(distTiles * CARAVAN_GOLD_PER_TILE * (foreign ? CARAVAN_FOREIGN_BONUS : 1)));
+}
 
 // How many soldiers of a squad are still standing at the given hp. Always at
 // least 1 while the squad lives (the last man carries the banner).
@@ -128,9 +144,10 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 2 }, walkable: true },
   miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 2, goldminer: 2 }, walkable: true },
   farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 }, walkable: true },
-  // Market: trade resources for gold (and back) at fluctuating prices. Not a
-  // resource drop-off; its UI panel (shown when selected) is the trade desk.
-  market: { hp: 500, vision: 4, footprint: 2, buildTime: 35, cost: { wood: 120, stone: 40 } },
+  // Market: trade resources for gold (and back) at fluctuating prices, and
+  // train trade caravans that shuttle gold between markets. Not a resource
+  // drop-off; its UI panel (shown when selected) is the trade desk.
+  market: { hp: 500, vision: 4, footprint: 2, buildTime: 35, cost: { wood: 120, stone: 40 }, trains: ['caravan'] },
   barracks: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['militia', 'warrior', 'spearman', 'catapult'], outline: 1 },
   range: { hp: 600, vision: 4, footprint: 3, buildTime: 45, cost: { wood: 175 }, trains: ['archer', 'longbowman'], outline: 1 },
   stable: { hp: 600, vision: 4, footprint: 3, buildTime: 50, cost: { wood: 175 }, trains: ['scoutCavalry', 'knight', 'horseArcher'], outline: 1 },
@@ -280,6 +297,7 @@ export const PROJECTILE_OF: Partial<Record<EntityKind, ProjectileKind>> = {
 export function combatOf(kind: EntityKind): CombatStat | null {
   if (isUnit(kind)) {
     const u = UNIT_STATS[kind];
+    if (u.attack <= 0) return null; // caravans etc. never fight, even in defence
     return { attack: u.attack, range: u.range, attackCooldown: u.attackCooldown * COMBAT_DURATION_SCALE };
   }
   if (isBuilding(kind)) {

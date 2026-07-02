@@ -37,6 +37,7 @@ import {
   restartPlayer,
 } from './session.js';
 import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/movement.js';
+import { assignTradeRoute } from '../sim/systems/trade.js';
 import { killEntity } from '../sim/systems/combat.js';
 import { spawnBuilding } from '../sim/spawn.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
@@ -213,6 +214,13 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
           cs.targetId = null;
           cs.commanded = false;
         }
+        // A manual move order takes a caravan off its trade route.
+        const tr = world.trader.get(id);
+        if (tr && tr.state !== 'idle') {
+          tr.state = 'idle';
+          tr.homeId = null;
+          tr.targetId = null;
+        }
         if (msg.queue) queueMoveTarget(world, id, targets[i].x, targets[i].y);
         else setMoveTarget(world, id, targets[i].x, targets[i].y);
       });
@@ -388,6 +396,21 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       return;
     }
 
+    case 'trade': {
+      // Route owned caravans to a market. First validation error is toasted.
+      if (world.kind.get(msg.marketId) !== 'market') return session.reject('that is not a market');
+      let err: string | null = null;
+      let assigned = 0;
+      for (const id of msg.caravanIds) {
+        if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'caravan') continue;
+        const e = assignTradeRoute(world, id, msg.marketId);
+        if (e) err = e;
+        else assigned++;
+      }
+      if (assigned === 0 && err) return session.reject(err);
+      return;
+    }
+
     case 'diplomacy': {
       const other = msg.playerId;
       if (other === playerId || !world.players.has(other)) return session.reject('unknown player');
@@ -493,6 +516,14 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         if (cs) {
           cs.targetId = null;
           cs.commanded = false;
+        }
+        // Stop also takes a caravan off its trade route.
+        const tr = world.trader.get(id);
+        if (tr && tr.state !== 'idle') {
+          tr.state = 'idle';
+          tr.homeId = null;
+          tr.targetId = null;
+          world.markDirty(id);
         }
       }
       return;

@@ -39,6 +39,8 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.farmAuto !== b.farmAuto ||
     a.job !== b.job ||
     a.stance !== b.stance ||
+    a.trade?.target !== b.trade?.target ||
+    a.trade?.home !== b.trade?.home ||
     a.corpse?.fade !== b.corpse?.fade ||
     a.corpse?.kind !== b.corpse?.kind ||
     pathChanged(a.path, b.path)
@@ -93,6 +95,7 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
         if (v.farmAuto !== undefined) delete v.farmAuto;
         if (v.job !== undefined) delete v.job;
         if (v.stance !== undefined) delete v.stance;
+        if (v.trade !== undefined) delete v.trade;
         if (v.path) delete v.path;
       }
       out.set(id, v);

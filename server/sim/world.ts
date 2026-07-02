@@ -8,6 +8,7 @@ import {
   BUILDING_STATS,
   CORPSE_TTL_S,
   UNIT_STATS,
+  caravanGold,
   isBuilding,
   isUnit,
 } from '../../shared/stats.js';
@@ -18,6 +19,7 @@ import type {
   Gatherer,
   Movement,
   PlayerState,
+  Trader,
   TrainItem,
 } from './components.js';
 
@@ -52,6 +54,8 @@ export class World {
   readonly farmAuto = new Map<EntityId, boolean>();
   readonly combat = new Map<EntityId, CombatState>();
   readonly resourceAmount = new Map<EntityId, number>();
+  // Caravans' trade routes (see systems/trade.ts).
+  readonly trader = new Map<EntityId, Trader>();
   // Dead units' bodies (kind === 'corpse'): decorative, neutral, decaying.
   readonly corpses = new Map<EntityId, Corpse>();
 
@@ -261,6 +265,7 @@ export class World {
     this.farmAuto.delete(id);
     this.combat.delete(id);
     this.resourceAmount.delete(id);
+    this.trader.delete(id);
     this.corpses.delete(id);
     this.dirtyEntities.delete(id);
     this.removedEntities.add(id);
@@ -328,6 +333,20 @@ export class World {
     if (this.movement.has(id) && !this.gatherer.has(id)) {
       const cs = this.combat.get(id);
       if (cs) v.stance = cs.stance;
+    }
+
+    // Caravan trade route + per-delivery gold (owner-only; stripped in snapshot).
+    if (kind === 'caravan') {
+      const tr = this.trader.get(id);
+      if (tr && tr.homeId != null && tr.targetId != null) {
+        const h = this.transform.get(tr.homeId);
+        const t = this.transform.get(tr.targetId);
+        if (h && t) {
+          const foreign = this.owner.get(tr.targetId) !== this.owner.get(id);
+          const distTiles = Math.hypot(t.x - h.x, t.y - h.y) / TILE;
+          v.trade = { home: tr.homeId, target: tr.targetId, gold: caravanGold(distTiles, foreign), foreign };
+        }
+      }
     }
 
     // Corpse: the original unit kind (sprite), its team (tint), and decay. Fade

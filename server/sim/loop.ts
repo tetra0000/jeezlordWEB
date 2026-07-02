@@ -10,6 +10,7 @@ import { pathfindingSystem } from './systems/pathfinding.js';
 import { movementSystem } from './systems/movement.js';
 import { separationSystem } from './systems/separation.js';
 import { gatherSystem } from './systems/gather.js';
+import { tradeSystem } from './systems/trade.js';
 import { farmSystem } from './systems/farm.js';
 import { constructionSystem } from './systems/construction.js';
 import { territorySystem } from './systems/territory.js';
@@ -79,6 +80,7 @@ export class GameLoop {
     movementSystem(this.world, DT);
     separationSystem(this.world); // ease overlapping units apart (crowds, not blobs)
     gatherSystem(this.world, DT);
+    tradeSystem(this.world, DT); // caravans arrive/turn around/deposit gold
     farmSystem(this.world, DT);
     constructionSystem(this.world, DT);
     territorySystem(this.world, DT);

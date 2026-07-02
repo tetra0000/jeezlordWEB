@@ -75,6 +75,14 @@ export interface Corpse {
   age: number; // sim-seconds since death
 }
 
+// A caravan's trade route. The caravan shuttles home -> target -> home,
+// depositing gold with the owner each time it arrives home. Persisted.
+export interface Trader {
+  state: 'idle' | 'outbound' | 'homebound';
+  homeId: EntityId | null; // own market the gold is delivered to
+  targetId: EntityId | null; // market being traded with (own far market or another player's)
+}
+
 export interface CombatState {
   cooldownLeft: number;
   targetId: EntityId | null;

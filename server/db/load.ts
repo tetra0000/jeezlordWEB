@@ -78,6 +78,10 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT entity_id, amount FROM resource_nodes').all() as Array<{ entity_id: number; amount: number }>)
     resourceById.set(r.entity_id, r.amount);
 
+  const tradeById = new Map<number, { state: string; home_id: number | null; target_id: number | null }>();
+  for (const t of h.prepare('SELECT entity_id, state, home_id, target_id FROM ent_trade').all() as Array<{ entity_id: number; state: string; home_id: number | null; target_id: number | null }>)
+    tradeById.set(t.entity_id, t);
+
   const stanceById = new Map<number, string>();
   for (const s of h.prepare('SELECT entity_id, stance FROM ent_stance').all() as Array<{ entity_id: number; stance: string }>)
     stanceById.set(s.entity_id, s.stance);
@@ -119,6 +123,12 @@ export function loadWorld(db: Db, world: World): void {
         world.gatherer.set(id, g
           ? { state: g.state as 'idle', carrying: g.carrying, carryType: (g.carry_type as ResourceType) ?? null, nodeId: g.node_id, job: (g.job as VillagerJob) ?? 'builder', idleTime: 0 }
           : { state: 'idle', carrying: 0, carryType: null, nodeId: null, job: 'builder', idleTime: 0 });
+      }
+      if (kind === 'caravan') {
+        const t = tradeById.get(id);
+        world.trader.set(id, t
+          ? { state: t.state as 'idle', homeId: t.home_id, targetId: t.target_id }
+          : { state: 'idle', homeId: null, targetId: null });
       }
     } else if (isBuilding(kind)) {
       const f = BUILDING_STATS[kind].footprint;

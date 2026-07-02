@@ -130,6 +130,16 @@ export interface DiplomacyMsg {
   playerId: PlayerId; // the other player
 }
 
+// Send owned caravans to trade with a market: another player's market (any
+// distance) or one of your own far-away markets. The caravan's home becomes
+// your market nearest to it; it then shuttles the route earning gold per
+// delivery (+50% when the target market belongs to another player).
+export interface TradeMsg {
+  t: 'trade';
+  caravanIds: EntityId[];
+  marketId: EntityId;
+}
+
 // Set the stance of one or more owned military squads (how they auto-engage).
 export interface StanceMsg {
   t: 'stance';
@@ -190,6 +200,7 @@ export type ClientMsg =
   | RenameMsg
   | FarmReseedMsg
   | DiplomacyMsg
+  | TradeMsg
   | StanceMsg
   | StopMsg
   | DeleteMsg

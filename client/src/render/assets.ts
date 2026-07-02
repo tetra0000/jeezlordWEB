@@ -6,7 +6,7 @@ import type { EntityKind } from '../../../shared/types.js';
 
 const ENTITY_KINDS: EntityKind[] = [
   'villager', 'militia', 'warrior', 'spearman', 'archer', 'longbowman',
-  'scoutCavalry', 'knight', 'horseArcher', 'catapult',
+  'scoutCavalry', 'knight', 'horseArcher', 'catapult', 'caravan',
   'townCenter', 'house', 'mill', 'lumbercamp', 'miningcamp', 'market', 'barracks', 'range', 'stable', 'tower', 'wall', 'farm',
   'tree', 'gold', 'stone', 'berry',
 ];

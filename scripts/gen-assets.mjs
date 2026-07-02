@@ -191,6 +191,24 @@ function horseArcher() {
   im.outline();
   im.save('horseArcher');
 }
+function caravan() {
+  // A covered trade wagon pulled by a mule: cart body, canvas hood, two wheels.
+  const im = new Img(32, 32);
+  im.rect(8, 15, 14, 8, M); // cart bed
+  for (let i = 0; i < 7; i++) im.rect(9 + i, 9 + Math.abs(3 - i) * 0.6, 12 - 0, 2, W); // rounded canvas hood
+  im.rect(9, 11, 12, 5, W); // hood body
+  im.circle(11, 25, 4, D); // wheels
+  im.circle(19, 25, 4, D);
+  im.circle(11, 25, 1, M);
+  im.circle(19, 25, 1, M);
+  im.ellipse(26, 19, 4, 3, L); // mule
+  im.rect(24, 22, 2, 6, M); // mule legs
+  im.rect(28, 22, 2, 6, M);
+  im.ellipse(29, 15, 2, 2, L); // mule head
+  im.line(22, 18, 25, 18, D, 0); // harness
+  im.outline();
+  im.save('caravan');
+}
 function catapult() {
   const im = new Img(32, 32);
   im.rect(8, 16, 18, 9, M); // frame
@@ -410,6 +428,7 @@ longbowman();
 scoutCavalry();
 knight();
 horseArcher();
+caravan();
 catapult();
 townCenter();
 house();

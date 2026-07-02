@@ -107,6 +107,14 @@ export function initSchema(db: DatabaseSync): void {
       farm_auto INTEGER
     );
 
+    -- Caravan trade routes (home/target market entity ids).
+    CREATE TABLE IF NOT EXISTS ent_trade (
+      entity_id INTEGER PRIMARY KEY,
+      state     TEXT NOT NULL,
+      home_id   INTEGER,
+      target_id INTEGER
+    );
+
     -- Military squad stance (aggressive/defensive/standGround/noAttack).
     CREATE TABLE IF NOT EXISTS ent_stance (
       entity_id INTEGER PRIMARY KEY,

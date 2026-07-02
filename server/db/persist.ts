@@ -30,6 +30,7 @@ export function flush(db: Db, world: World): void {
   );
   const upResource = h.prepare(`INSERT OR REPLACE INTO resource_nodes (entity_id, amount) VALUES (?, ?)`);
   const upStance = h.prepare(`INSERT OR REPLACE INTO ent_stance (entity_id, stance) VALUES (?, ?)`);
+  const upTrade = h.prepare(`INSERT OR REPLACE INTO ent_trade (entity_id, state, home_id, target_id) VALUES (?, ?, ?, ?)`);
   const upCorpse = h.prepare(
     `INSERT OR REPLACE INTO ent_corpse (entity_id, unit_kind, team, age) VALUES (?, ?, ?, ?)`,
   );
@@ -44,6 +45,7 @@ export function flush(db: Db, world: World): void {
   const delResource = h.prepare('DELETE FROM resource_nodes WHERE entity_id = ?');
   const delCorpse = h.prepare('DELETE FROM ent_corpse WHERE entity_id = ?');
   const delStance = h.prepare('DELETE FROM ent_stance WHERE entity_id = ?');
+  const delTrade = h.prepare('DELETE FROM ent_trade WHERE entity_id = ?');
 
   const deleteAllSidecars = (id: number) => {
     delMove.run(id);
@@ -55,6 +57,7 @@ export function flush(db: Db, world: World): void {
     delResource.run(id);
     delCorpse.run(id);
     delStance.run(id);
+    delTrade.run(id);
   };
 
   h.exec('BEGIN IMMEDIATE');
@@ -103,6 +106,10 @@ export function flush(db: Db, world: World): void {
       // Squad stance (units only — building combatants always fire at will).
       const cs = world.combat.get(id);
       if (cs && world.movement.has(id)) upStance.run(id, cs.stance);
+
+      // Caravan trade route.
+      const tr = world.trader.get(id);
+      if (tr) upTrade.run(id, tr.state, tr.homeId, tr.targetId);
 
       const cp = world.corpses.get(id);
       if (cp) upCorpse.run(id, cp.unitKind, cp.team, cp.age);

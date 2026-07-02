@@ -38,6 +38,7 @@ export const KIND_STYLE: Record<EntityKind, KindStyle> = {
   knight: { shape: 'circle', glyph: 'K', size: 14 },
   horseArcher: { shape: 'circle', glyph: 'H', size: 14 },
   catapult: { shape: 'circle', glyph: 'C', size: 14 },
+  caravan: { shape: 'circle', glyph: '$', size: 13 },
   wall: { shape: 'rect', glyph: '', size: 14 },
   tower: { shape: 'rect', glyph: 'T', size: 14 },
   townCenter: { shape: 'rect', glyph: 'TC', size: 46 },

@@ -24,6 +24,9 @@ export type EntityKind =
   | 'knight'
   | 'horseArcher'
   | 'catapult'
+  // Trade caravan: a defenceless wagon that shuttles between two markets and
+  // earns gold on every delivery home (see server/sim/systems/trade.ts).
+  | 'caravan'
   | 'wall'
   | 'tower'
   | 'townCenter'
@@ -144,6 +147,9 @@ export interface EntityView {
   farmAuto?: boolean; // farms: auto-reseed toggle (sent to the owner only)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
   stance?: Stance; // military squads: current stance (sent to the owner only)
+  // Caravans: the active trade route (market entity ids) and the gold earned
+  // per delivery. Sent to the owner only.
+  trade?: { home: EntityId; target: EntityId; gold: number; foreign: boolean };
   path?: Vec2[]; // units: remaining move waypoints in world px (sent to the owner only)
   // Corpses (kind === 'corpse'): the unit kind that died (which sprite to draw),
   // its team (original owner, for tinting; the corpse entity itself is neutral),
