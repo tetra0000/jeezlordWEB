@@ -5,12 +5,18 @@
 //
 //   node scripts/gen-assets.mjs
 import { PNG } from 'pngjs';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'client', 'assets');
 mkdirSync(OUT, { recursive: true });
+
+// Sprites that were HAND-RESKINNED (real pixel art dropped in over the
+// generated placeholders). The generator must never clobber them: save()
+// skips these when the file already exists. Delete the PNG first if you
+// really want the generated placeholder back.
+const HAND_MADE = new Set(['townCenter', 'barracks', 'range', 'stable', 'house', 'mill', 'market']);
 
 // Tintable greyscale palette (multiply by owner colour on the client).
 const L = [228, 228, 224]; // light (takes team colour strongly)
@@ -67,6 +73,10 @@ class Img {
       }
   }
   save(name) {
+    if (HAND_MADE.has(name) && existsSync(join(OUT, name + '.png'))) {
+      console.log(`[gen-assets] kept hand-made ${name}.png`);
+      return;
+    }
     const png = new PNG({ width: this.w, height: this.h });
     png.data = Buffer.from(this.d.buffer, 0, this.w * this.h * 4);
     writeFileSync(join(OUT, name + '.png'), PNG.sync.write(png));
