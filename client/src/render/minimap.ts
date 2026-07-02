@@ -3,7 +3,7 @@
 // camera viewport rectangle. Click to recentre the camera.
 import {
   MAP_PX, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
-  TERRAIN_DIRT, TERRAIN_FLOWERS,
+  TERRAIN_DIRT, TERRAIN_FLOWERS, TERRAIN_LONGGRASS, TERRAIN_SWAMP, TERRAIN_ROCKS, TERRAIN_PASS,
 } from '../../../shared/constants.js';
 import { isBuilding, isResourceNode } from '../../../shared/stats.js';
 import type { ClientState } from '../state.js';
@@ -58,6 +58,10 @@ export class Minimap {
       [TERRAIN_BEACH]: [0xd9, 0xc8, 0x9a],
       [TERRAIN_DIRT]: [0x4a, 0x3e, 0x28],
       [TERRAIN_FLOWERS]: [0x2a, 0x38, 0x1e],
+      [TERRAIN_LONGGRASS]: [0x1a, 0x28, 0x14],
+      [TERRAIN_SWAMP]: [0x2e, 0x38, 0x24],
+      [TERRAIN_ROCKS]: [0x3e, 0x40, 0x3a],
+      [TERRAIN_PASS]: [0x4e, 0x4a, 0x46],
     };
     for (let i = 0; i < terrain.length; i++) {
       const c = COLOR[terrain[i]] ?? BASE;

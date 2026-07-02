@@ -31,7 +31,7 @@ export function flush(db: Db, world: World): void {
   const upRoad = h.prepare(`INSERT OR REPLACE INTO road_wear (tile, wear) VALUES (?, ?)`);
   const upResource = h.prepare(`INSERT OR REPLACE INTO resource_nodes (entity_id, amount) VALUES (?, ?)`);
   const upStance = h.prepare(`INSERT OR REPLACE INTO ent_stance (entity_id, stance) VALUES (?, ?)`);
-  const upTrade = h.prepare(`INSERT OR REPLACE INTO ent_trade (entity_id, state, home_id, target_id) VALUES (?, ?, ?, ?)`);
+  const upTrade = h.prepare(`INSERT OR REPLACE INTO ent_trade (entity_id, state, route_id, stop_index, last_stop) VALUES (?, ?, ?, ?, ?)`);
   const upCorpse = h.prepare(
     `INSERT OR REPLACE INTO ent_corpse (entity_id, unit_kind, team, age) VALUES (?, ?, ?, ?)`,
   );
@@ -111,9 +111,9 @@ export function flush(db: Db, world: World): void {
       const cs = world.combat.get(id);
       if (cs && world.movement.has(id)) upStance.run(id, cs.stance);
 
-      // Caravan trade route.
+      // Caravan route assignment.
       const tr = world.trader.get(id);
-      if (tr) upTrade.run(id, tr.state, tr.homeId, tr.targetId);
+      if (tr) upTrade.run(id, tr.state, tr.routeId, tr.stopIndex, tr.lastStopId);
 
       const cp = world.corpses.get(id);
       if (cp) upCorpse.run(id, cp.unitKind, cp.team, cp.age);
@@ -145,6 +145,14 @@ export function flush(db: Db, world: World): void {
       world.diploDirty = false;
     }
 
+    // Trade routes: like diplomacy, the whole set is small — rewrite on change.
+    if (world.routesDirty) {
+      h.exec('DELETE FROM trade_routes');
+      const upRoute = h.prepare('INSERT INTO trade_routes (id, owner, stops_json) VALUES (?, ?, ?)');
+      for (const route of world.tradeRoutes.values()) upRoute.run(route.id, route.owner, JSON.stringify(route.stops));
+      world.routesDirty = false;
+    }
+
     // Caravan road wear: only tiles worn since the last flush.
     for (const tile of world.dirtyRoads) {
       const w = world.roadWear.get(tile);
@@ -152,6 +160,7 @@ export function flush(db: Db, world: World): void {
     }
 
     db.setMeta('next_entity_id', String(world.peekNextId()));
+    db.setMeta('next_route_id', String(world.nextRouteId));
     // Global market price multipliers (small, drift continuously — write each flush).
     db.setMeta('market_wood', String(world.market.wood));
     db.setMeta('market_food', String(world.market.food));

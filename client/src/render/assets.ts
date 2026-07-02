@@ -39,11 +39,23 @@ export async function loadAssets(): Promise<void> {
     tile_beach: 'assets/tile_beach.png',
     tile_dirt: 'assets/tile_dirt.png',
     tile_flowers: 'assets/tile_flowers.png',
+    tile_longgrass: 'assets/tile_longgrass.png',
+    tile_swamp: 'assets/tile_swamp.png',
+    tile_rocks: 'assets/tile_rocks.png',
+    tile_pass: 'assets/tile_pass.png',
     tile_forestground: 'assets/tile_forestground.png',
     tile_path: 'assets/tile_path.png',
     tile_road: 'assets/tile_road.png',
+    tile_road2: 'assets/tile_road2.png',
     gate_open: 'assets/gate_open.png',
   };
+  // Autotiling variants: walls, forest canopies and mountain tiles come in 16
+  // connection-mask flavours each (bit 1 = N, 2 = E, 4 = S, 8 = W neighbour).
+  for (let m = 0; m < 16; m++) {
+    manifest['wall_' + m] = `assets/wall_${m}.png`;
+    manifest['tree_' + m] = `assets/tree_${m}.png`;
+    manifest['tile_mountain_' + m] = `assets/tile_mountain_${m}.png`;
+  }
   for (const k of ENTITY_KINDS) manifest[k] = `assets/${k}.png`;
   for (const k of TEAM_KINDS) manifest['team_' + k] = `assets/team_${k}.png`;
   for (const k of ICON_KINDS) manifest['icon_' + k] = `assets/icon_${k}.png`;

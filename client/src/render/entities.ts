@@ -33,6 +33,8 @@ interface Sprite_ {
   icon?: Sprite;
   iconKey: string; // last texture key drawn ('' = none)
   gateOpenShown?: boolean; // gates: last drawn open/closed texture state
+  gateVertShown?: boolean; // gates: last drawn orientation (vertical wall run)
+  maskShown?: number; // walls/trees: last drawn connection mask (-1 = none yet)
   // Overlay graphics are created lazily and skipped entirely for resource nodes
   // (the bulk of the world): they're never selected, damaged, or built/trained,
   // so they need none of these — saving 4 Graphics per node under admin reveal.
@@ -559,6 +561,29 @@ export class EntityLayer {
       }
     }
 
+    // Autotiling lookups, rebuilt each frame from ALL known entities (not just
+    // on-screen ones, so masks are right at the viewport edge): which tile
+    // holds a wall/gate (and whose), and which holds a tree. Walls join only to
+    // same-owner walls/gates; forest canopies join to any adjacent tree.
+    const mt = state.mapTiles || 1;
+    const wallAt = new Map<number, PlayerId | null>();
+    const treeAt = new Set<number>();
+    for (const e of state.entities.values()) {
+      const v = e.view;
+      if (v.kind !== 'wall' && v.kind !== 'gate' && v.kind !== 'tree') continue;
+      const idx = Math.floor(v.y / TILE) * mt + Math.floor(v.x / TILE);
+      if (v.kind === 'tree') treeAt.add(idx);
+      else wallAt.set(idx, v.owner);
+    }
+    const wallMask = (idx: number, owner: PlayerId | null): number =>
+      ((wallAt.has(idx - mt) && wallAt.get(idx - mt) === owner ? 1 : 0) |
+        (wallAt.has(idx + 1) && wallAt.get(idx + 1) === owner ? 2 : 0) |
+        (wallAt.has(idx + mt) && wallAt.get(idx + mt) === owner ? 4 : 0) |
+        (wallAt.has(idx - 1) && wallAt.get(idx - 1) === owner ? 8 : 0));
+    const treeMask = (idx: number): number =>
+      ((treeAt.has(idx - mt) ? 1 : 0) | (treeAt.has(idx + 1) ? 2 : 0) |
+        (treeAt.has(idx + mt) ? 4 : 0) | (treeAt.has(idx - 1) ? 8 : 0));
+
     const k = Math.min(1, dtSeconds * INTERP_RATE);
     for (const [id, e] of state.entities) {
       // Viewport culling: entities outside the (padded) camera rect get no
@@ -614,12 +639,52 @@ export class EntityLayer {
         }
       }
 
-      // Gates swap texture between closed and open (mode 'open' draws raised).
+      // Walls autotile: pick the variant whose arms match the same-owner
+      // walls/gates on the 4 neighbouring tiles, so a run reads as one
+      // continuous curtain wall instead of repeated lone blocks.
+      if (v.kind === 'wall') {
+        const idx = Math.floor(v.y / TILE) * mt + Math.floor(v.x / TILE);
+        const mask = wallMask(idx, v.owner);
+        if (mask !== s.maskShown) {
+          s.maskShown = mask;
+          const t = tex['wall_' + mask];
+          if (t) s.body.texture = t;
+        }
+      }
+
+      // Gates swap texture between closed and open (mode 'open' draws raised),
+      // and rotate to sit flush in a vertical wall run (same-owner walls above/
+      // below but none beside).
       if (v.kind === 'gate') {
         const open = v.gate === 'open';
         if (open !== s.gateOpenShown && tex.gate_open) {
           s.gateOpenShown = open;
           s.body.texture = open ? tex.gate_open : tex.gate;
+        }
+        const idx = Math.floor(v.y / TILE) * mt + Math.floor(v.x / TILE);
+        const gm = wallMask(idx, v.owner);
+        const vertical = (gm & 5) !== 0 && (gm & 10) === 0; // N/S neighbours only
+        if (vertical !== s.gateVertShown) {
+          s.gateVertShown = vertical;
+          s.body.rotation = vertical ? Math.PI / 2 : 0;
+        }
+      }
+
+      // Trees autotile into forests: adjacent canopies use the connected
+      // variants (drawn at full tile size so they actually meet); a lone tree
+      // keeps the classic single-tree sprite.
+      if (v.kind === 'tree') {
+        const idx = Math.floor(v.y / TILE) * mt + Math.floor(v.x / TILE);
+        const mask = treeMask(idx);
+        if (mask !== s.maskShown) {
+          s.maskShown = mask;
+          const t = tex['tree_' + mask];
+          if (t) {
+            s.body.texture = t;
+            const size = mask === 0 ? RESOURCE_SIZE : TILE;
+            s.body.width = size;
+            s.body.height = size;
+          }
         }
       }
 

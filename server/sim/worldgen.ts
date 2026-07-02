@@ -3,7 +3,7 @@
 // gold/stone/berry clusters — across the remaining grass. Runs only on a fresh
 // world (guarded by a 'seeded' meta flag in main.ts). Terrain is persisted as a
 // base64 blob; resources persist as entities.
-import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH, TERRAIN_DIRT, TERRAIN_FLOWERS } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH, TERRAIN_DIRT, TERRAIN_FLOWERS, TERRAIN_LONGGRASS, TERRAIN_SWAMP, TERRAIN_ROCKS, TERRAIN_PASS } from '../../shared/constants.js';
 import type { EntityId, EntityKind } from '../../shared/types.js';
 import type { World } from './world.js';
 import { spawnResourceNode } from './spawn.js';
@@ -188,6 +188,38 @@ function generateLakes(world: World): Set<number> {
       lakeTiles.delete(i);
     }
   }
+
+  // Absorb islands: overlapping lake lobes can leave a dry pocket fully
+  // enclosed by lake water. Such a pocket could only stay reachable via a lake
+  // bridge — the one thing connectivity corridors must never lay — so any tile
+  // that can't reach the map border without crossing a lake becomes lake too.
+  const N = MAP_TILES;
+  const seen = new Uint8Array(N * N);
+  const q: number[] = [];
+  for (let i = 0; i < N; i++) {
+    for (const idx of [i, (N - 1) * N + i, i * N, i * N + N - 1]) {
+      if (!lakeTiles.has(idx) && !seen[idx]) { seen[idx] = 1; q.push(idx); }
+    }
+  }
+  for (let h = 0; h < q.length; h++) {
+    const cur = q[h];
+    const x = cur % N;
+    const y = (cur - x) / N;
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const ni = ny * N + nx;
+      if (seen[ni] || lakeTiles.has(ni)) continue;
+      seen[ni] = 1;
+      q.push(ni);
+    }
+  }
+  for (let i = 0; i < N * N; i++) {
+    if (!seen[i] && !lakeTiles.has(i)) {
+      world.terrain[i] = TERRAIN_WATER;
+      lakeTiles.add(i);
+    }
+  }
   return lakeTiles;
 }
 
@@ -347,15 +379,19 @@ function generateRivers(world: World): void {
   }
 }
 
-// Cosmetic ground variety: dry dirt patches and flower meadows stamped as
-// organic blobs over the grassland (passable, purely visual). Placed after
-// water/beaches but before mountains/forests, so woods and ranges leave the
-// meadows as natural clearings.
+// Cosmetic ground variety: dry dirt patches, flower meadows and LONG GRASS
+// stamped as organic blobs over the grassland (passable, purely visual). Placed
+// after water/beaches but before mountains/forests, so woods and ranges leave
+// the meadows as natural clearings.
 function generateGroundVariety(world: World): void {
-  const blobs = Math.floor((MAP_TILES * MAP_TILES) / 6000); // ~98 on a 768 map
+  const blobs = Math.floor((MAP_TILES * MAP_TILES) / 4500); // ~131 on a 768 map
   for (let i = 0; i < blobs; i++) {
-    const code = Math.random() < 0.55 ? TERRAIN_DIRT : TERRAIN_FLOWERS;
-    const baseR = 3 + Math.floor(Math.random() * 8); // 3..10
+    const roll = Math.random();
+    const code = roll < 0.4 ? TERRAIN_DIRT : roll < 0.65 ? TERRAIN_FLOWERS : TERRAIN_LONGGRASS;
+    // Long grass sweeps come out bigger than the dirt/flower patches.
+    const baseR = code === TERRAIN_LONGGRASS
+      ? 5 + Math.floor(Math.random() * 10) // 5..14
+      : 3 + Math.floor(Math.random() * 8); // 3..10
     const lobes = blobLobes(randTile(), randTile(), baseR, Math.random() < 0.35);
     const { minX, minY, maxX, maxY } = lobeBounds(lobes);
     for (let ty = minY; ty <= maxY; ty++) {
@@ -364,6 +400,60 @@ function generateGroundVariety(world: World): void {
         if (edge > 0) continue;
         if (edge > -1.5 && Math.random() < 0.5) continue; // ragged rim
         if (world.terrainAt(tx, ty) === TERRAIN_GRASS) setTerrain(world, tx, ty, code);
+      }
+    }
+  }
+}
+
+// Random rock outcrops: small scree patches (1..4 tiles) scattered anywhere on
+// open grassland for ground variety. Passable, purely visual.
+function generateRocks(world: World): void {
+  const spots = Math.floor((MAP_TILES * MAP_TILES) / 3500); // ~168 on a 768 map
+  for (let s = 0; s < spots; s++) {
+    const cx = randTile();
+    const cy = randTile();
+    const n = 1 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < n; i++) {
+      const tx = cx + Math.floor((Math.random() - 0.5) * 3);
+      const ty = cy + Math.floor((Math.random() - 0.5) * 3);
+      const t = world.terrainAt(tx, ty);
+      if (t === TERRAIN_GRASS || t === TERRAIN_LONGGRASS || t === TERRAIN_DIRT)
+        setTerrain(world, tx, ty, TERRAIN_ROCKS);
+    }
+  }
+}
+
+// Swamps: boggy blobs hugging water (river banks and lake shores). Passable but
+// debuffed ground — units move slow and fight weak in them (movement.ts /
+// combat.ts), so they shape routes without walling anything off.
+function generateSwamps(world: World): void {
+  // Candidate seeds: land tiles with water within 3 tiles.
+  const nearWater = (tx: number, ty: number): boolean => {
+    for (let dy = -3; dy <= 3; dy++)
+      for (let dx = -3; dx <= 3; dx++)
+        if (world.terrainAt(tx + dx, ty + dy) === TERRAIN_WATER) return true;
+    return false;
+  };
+  const seeds: Array<{ x: number; y: number }> = [];
+  const want = Math.round(14 * ((MAP_TILES * MAP_TILES) / (512 * 512))); // ~31 on 768
+  let guard = 4000;
+  while (seeds.length < want && guard-- > 0) {
+    const tx = randTile();
+    const ty = randTile();
+    const t = world.terrainAt(tx, ty);
+    if ((t === TERRAIN_GRASS || t === TERRAIN_MUD) && nearWater(tx, ty)) seeds.push({ x: tx, y: ty });
+  }
+  for (const s of seeds) {
+    const baseR = 5 + Math.floor(Math.random() * 9); // 5..13
+    const lobes = blobLobes(s.x, s.y, baseR, Math.random() < 0.5);
+    const { minX, minY, maxX, maxY } = lobeBounds(lobes);
+    for (let ty = minY; ty <= maxY; ty++) {
+      for (let tx = minX; tx <= maxX; tx++) {
+        const edge = lobeEdgeDist(lobes, tx, ty);
+        if (edge > 0) continue;
+        if (edge > -1.5 && Math.random() < 0.45) continue; // ragged rim
+        const t = world.terrainAt(tx, ty);
+        if (t === TERRAIN_GRASS || t === TERRAIN_MUD) setTerrain(world, tx, ty, TERRAIN_SWAMP);
       }
     }
   }
@@ -433,7 +523,8 @@ function carveMountainRange(world: World, protect: Set<number>): void {
     pts.push({ x: rx, y: ry, r });
   }
 
-  // Punch 2..3 walkable passes: a perpendicular band cleared back to grass.
+  // Punch 2..3 walkable passes: a perpendicular band cleared to rocky PASS
+  // floor (bare mountain-pass ground, not grass).
   const passes = 2 + Math.floor(Math.random() * 2);
   for (let p = 0; p < passes; p++) {
     const frac = (p + 0.5 + (Math.random() - 0.5) * 0.4) / passes;
@@ -454,7 +545,7 @@ function carveMountainRange(world: World, protect: Set<number>): void {
       for (let w = -halfThick; w <= halfThick; w++) {
         const bx = Math.round(c.x + px * d + tx * w);
         const by = Math.round(c.y + py * d + ty * w);
-        if (world.terrainAt(bx, by) === TERRAIN_MOUNTAIN) setTerrain(world, bx, by, TERRAIN_GRASS);
+        if (world.terrainAt(bx, by) === TERRAIN_MOUNTAIN) setTerrain(world, bx, by, TERRAIN_PASS);
       }
   }
 }
@@ -472,8 +563,8 @@ function stampMountainDisk(world: World, cx: number, cy: number, r: number, prot
     }
 }
 
-// Clear a straight walkable band (mountain -> grass) through a point, so a
-// massif/ridge is never a solid wall.
+// Clear a straight walkable band (mountain -> rocky PASS floor) through a
+// point, so a massif/ridge is never a solid wall.
 function punchPass(world: World, cx: number, cy: number, ang: number, reach: number, halfThick: number): void {
   const dx = Math.cos(ang), dy = Math.sin(ang);
   const px = -dy, py = dx;
@@ -481,7 +572,7 @@ function punchPass(world: World, cx: number, cy: number, ang: number, reach: num
     for (let w = -halfThick; w <= halfThick; w++) {
       const bx = Math.round(cx + dx * d + px * w);
       const by = Math.round(cy + dy * d + py * w);
-      if (world.terrainAt(bx, by) === TERRAIN_MOUNTAIN) setTerrain(world, bx, by, TERRAIN_GRASS);
+      if (world.terrainAt(bx, by) === TERRAIN_MOUNTAIN) setTerrain(world, bx, by, TERRAIN_PASS);
     }
 }
 
@@ -570,7 +661,7 @@ function ensureConnectivity(world: World, lakeTiles: Set<number>): number {
           // Never bridge a lake — only river water. (The robust pass2 routes
           // around lakes; here we just refuse to lay a lake bridge.)
           if (world.terrain[i] === TERRAIN_WATER && !lakeTiles.has(i)) world.terrain[i] = TERRAIN_BRIDGE;
-          else if (world.terrain[i] === TERRAIN_MOUNTAIN) world.terrain[i] = TERRAIN_GRASS;
+          else if (world.terrain[i] === TERRAIN_MOUNTAIN) world.terrain[i] = TERRAIN_PASS;
         }
       // Reached the connected region (after moving at least one tile)?
       if ((x !== fromIdx % N || y !== (fromIdx - (fromIdx % N)) / N) && visited[y * N + x]) break;
@@ -690,7 +781,7 @@ function ensureWalkableConnectivity(world: World, lakeTiles: Set<number>): numbe
     // fallback (a pocket lakes fully enclose) bridges a lake — far better than
     // leaving land unreachable.
     if (t === TERRAIN_WATER) world.terrain[i] = TERRAIN_BRIDGE;
-    else if (t === TERRAIN_MOUNTAIN) world.terrain[i] = TERRAIN_GRASS;
+    else if (t === TERRAIN_MOUNTAIN) world.terrain[i] = TERRAIN_PASS;
     const node = nodeAt.get(i);
     if (node !== undefined) {
       world.unblockFootprint(tx, ty, 1);
@@ -766,8 +857,9 @@ function placeForest(world: World, cx: number, cy: number, baseR: number, protec
 
   const cleared = new Set<number>();
   // Bigger woods get more carved paths so units can still thread through them
-  // (trees block movement; the trails are the navigable gaps).
-  const trails = Math.max(1, Math.floor(spanR / 9));
+  // (trees block movement; the trails are the navigable gaps). v13: forests are
+  // bigger, so trails come denser — every wood has at least two ways through.
+  const trails = Math.max(2, Math.floor(spanR / 6));
   for (let t = 0; t < trails; t++) carveForestTrail(world, cx, cy, spanR, cleared);
 
   for (let ty = minY; ty <= maxY; ty++) {
@@ -798,24 +890,28 @@ function placeCluster(world: World, kind: EntityKind, cx: number, cy: number, co
   }
 }
 
-// A varied forest size: mostly small/medium groves with a few big woods, so the
-// map mixes thickets and sprawling forests rather than one uniform size.
+// A varied forest size: groves through sprawling great forests. v13 skews
+// bigger — woods should read as real forests you route around or thread
+// through, not clumps of trees.
 function forestSize(): number {
   const roll = Math.random();
-  if (roll < 0.45) return 5 + Math.floor(Math.random() * 7);   // grove: 5..11
-  if (roll < 0.8) return 12 + Math.floor(Math.random() * 9);   // wood: 12..20
-  return 21 + Math.floor(Math.random() * 12);                  // great forest: 21..32
+  if (roll < 0.35) return 6 + Math.floor(Math.random() * 8);   // grove: 6..13
+  if (roll < 0.75) return 14 + Math.floor(Math.random() * 12); // wood: 14..25
+  return 26 + Math.floor(Math.random() * 18);                  // great forest: 26..43
 }
 
 export function seedWorld(world: World): void {
   // Terrain first (meandering rivers + muddy banks, then large lakes, then
-  // beaches at shoreline points, then dirt/flower ground variety, then mountain
-  // ranges/massifs), then guarantee all land is reachable; resources fill the
-  // dry land after.
+  // beaches at shoreline points, then swamps hugging the water, then dirt/
+  // flower/long-grass ground variety + rock outcrops, then mountain ranges/
+  // massifs with rocky passes), then guarantee all land is reachable; resources
+  // fill the dry land after.
   generateRivers(world);
   const lakeTiles = generateLakes(world);
   generateBeaches(world);
+  generateSwamps(world);
   generateGroundVariety(world);
+  generateRocks(world);
   // Keep bridge banks clear so a crossing can't be walled off on both sides.
   generateMountains(world, bridgeClearance(world, 3));
   const connectors = ensureConnectivity(world, lakeTiles);
@@ -844,7 +940,8 @@ export function seedWorld(world: World): void {
   // (routing around lakes, so no corridor ever bridges a lake).
   const pockets = ensureWalkableConnectivity(world, lakeTiles);
 
-  let water = 0, bridge = 0, mountain = 0, mud = 0, beach = 0, dirt = 0, flowers = 0;
+  let water = 0, bridge = 0, mountain = 0, mud = 0, beach = 0, dirt = 0, flowers = 0,
+    longgrass = 0, swamp = 0, rocks = 0, pass = 0;
   for (let i = 0; i < world.terrain.length; i++) {
     const t = world.terrain[i];
     if (t === TERRAIN_WATER) water++;
@@ -854,10 +951,15 @@ export function seedWorld(world: World): void {
     else if (t === TERRAIN_BEACH) beach++;
     else if (t === TERRAIN_DIRT) dirt++;
     else if (t === TERRAIN_FLOWERS) flowers++;
+    else if (t === TERRAIN_LONGGRASS) longgrass++;
+    else if (t === TERRAIN_SWAMP) swamp++;
+    else if (t === TERRAIN_ROCKS) rocks++;
+    else if (t === TERRAIN_PASS) pass++;
   }
   console.log(
     `[worldgen] seeded ${[...world.entityIds()].length} resource nodes, ` +
-      `${water} water + ${bridge} bridge + ${mountain} mountain + ${mud} mud + ${beach} beach + ${dirt} dirt + ${flowers} flowers tiles, ` +
+      `${water} water + ${bridge} bridge + ${mountain} mountain (${pass} pass) + ${mud} mud + ${beach} beach + ` +
+      `${dirt} dirt + ${flowers} flowers + ${longgrass} longgrass + ${swamp} swamp + ${rocks} rocks tiles, ` +
       `${connectors} terrain + ${pockets} walkable corridor(s) carved`,
   );
 }

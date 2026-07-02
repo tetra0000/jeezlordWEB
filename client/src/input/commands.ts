@@ -68,8 +68,8 @@ const DESC: Record<string, string> = {
   range: 'Trains Archer and Longbowman squads.',
   stable: 'Trains Scout Cavalry, Knights and Horse Archers.',
   tower: 'Defensive tower: fires at nearby enemies and has long vision. Build on your frontier.',
-  wall: 'Cheap, tough barrier that blocks enemy movement. Click and DRAG to lay a whole run of wall at once.',
-  gate: 'A wall segment traffic can pass through. Select it to set who may pass: locked, open for trade (you, allies and caravans), or open to everyone.',
+  wall: 'Cheap, tough barrier that blocks enemy movement. Click and DRAG to lay a whole run at once — segments join into one continuous wall.',
+  gate: 'A wall segment traffic can pass through — place it in a gap or directly ON one of your walls to convert it. Select it to set who may pass: locked, trade (you, allies and caravans), or open to everyone.',
   // units (military units are SQUADS: they lose men, and damage, as hp drops)
   villager: 'Gathers resources and builds/repairs. Assign jobs in the Villagers panel (bottom-left).',
   militia: 'Squad of 4. Cheap, quick to raise — a mob with clubs. Melts against real soldiers.',
@@ -81,7 +81,7 @@ const DESC: Record<string, string> = {
   knight: 'Squad of 2. Heavy shock cavalry: expensive, hits like a hammer. Fears spearmen.',
   horseArcher: 'Squad of 2. Mobile skirmishers: shoot, ride away, repeat.',
   catapult: 'Slow siege engine: huge damage, devastating against buildings.',
-  caravan: 'Defenceless trade wagon. Right-click a market to set a trade route: it shuttles gold home every trip. Another player’s market pays +50%.',
+  caravan: 'Defenceless trade wagon. Runs trade routes of up to 8 market stops (🤝 menu → Trade), earning gold at every stop owned by another player. Right-click a foreign market for a quick route.',
 };
 const RES_TYPE: Record<string, string> = { tree: 'wood', gold: 'gold', stone: 'stone', berry: 'food' };
 const MK_EMOJI: Record<string, string> = { wood: '🌲', food: '🍖', stone: '🪨' };
@@ -181,6 +181,11 @@ export class Input {
   private readonly diploList = document.getElementById('diplo-list')!;
   private readonly diploBtn = document.getElementById('diplo-btn')!;
   private diploKey = '';
+  // Trade tab of the diplomacy modal: route manager + known-markets list.
+  private readonly tradePanel = document.getElementById('trade-panel')!;
+  private tradeTab = false;
+  private tradeKey = '';
+  private routeDraft: number[] = []; // market ids picked for a new route
   // True while hovering a DOM control with its own tooltip (setTip). Stops the
   // canvas hover handler (updateTooltip) from hiding/overwriting it on every move.
   private uiTipActive = false;
@@ -256,16 +261,31 @@ export class Input {
       if (e.target === this.confirmModal) this.closeConfirm();
     });
 
-    // Diplomacy menu.
+    // Diplomacy & trade menu (tabbed modal).
     this.diploBtn.addEventListener('click', () => {
       this.diploModal.classList.remove('hidden');
       this.diploKey = ''; // force a re-render
+      this.tradeKey = '';
       this.renderDiplo();
+      this.renderTrade();
     });
     document.getElementById('diplo-close')!.addEventListener('click', () => this.diploModal.classList.add('hidden'));
     this.diploModal.addEventListener('pointerdown', (e) => {
       if (e.target === this.diploModal) this.diploModal.classList.add('hidden');
     });
+    const setTab = (trade: boolean): void => {
+      this.tradeTab = trade;
+      document.getElementById('tab-diplo')!.classList.toggle('active', !trade);
+      document.getElementById('tab-trade')!.classList.toggle('active', trade);
+      this.diploList.classList.toggle('hidden', trade);
+      this.tradePanel.classList.toggle('hidden', !trade);
+      this.diploKey = '';
+      this.tradeKey = '';
+      this.renderDiplo();
+      this.renderTrade();
+    };
+    document.getElementById('tab-diplo')!.addEventListener('click', () => setTab(false));
+    document.getElementById('tab-trade')!.addEventListener('click', () => setTab(true));
 
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button === 0) {
@@ -598,9 +618,10 @@ export class Input {
     }
 
     const pan = panAt(cx);
-    // Caravans right-clicked onto a market get a trade route; any other
-    // selected units fall through to the normal move/attack handling below.
-    if (target && target.view.kind === 'market') {
+    // Caravans right-clicked onto ANOTHER player's market get a quick trade
+    // route (you cannot trade with yourself — an own market is just ground to
+    // walk to); any other selected units fall through to move/attack below.
+    if (target && target.view.kind === 'market' && target.view.owner !== this.state.playerId) {
       const caravans = ids.filter((id) => this.state.entities.get(id)?.view.kind === 'caravan');
       if (caravans.length > 0) {
         this.net.send({ t: 'trade', caravanIds: caravans, marketId: target.view.id });
@@ -758,12 +779,27 @@ export class Input {
     return true;
   }
 
+  // Is one of the player's own COMPLETED walls standing on this tile? (A gate
+  // may be placed over it — the server replaces the wall with the gate.)
+  private ownWallAt(tileX: number, tileY: number): boolean {
+    for (const e of this.state.entities.values()) {
+      const v = e.view;
+      if (v.kind !== 'wall' || v.owner !== this.state.playerId || v.build != null) continue;
+      if (Math.floor(v.x / TILE) === tileX && Math.floor(v.y / TILE) === tileY) return true;
+    }
+    return false;
+  }
+
   private placementValid(tileX: number, tileY: number, kind: EntityKind, occ?: Set<number>): boolean {
     const f = BUILDING_STATS[kind].footprint;
+    // A gate dropped onto one of your own walls replaces it (mirrors the server
+    // rule) — the occupied tile and territory checks don't apply there.
+    const gateOnWall = kind === 'gate' && this.ownWallAt(tileX, tileY);
     // Occupied ground (visible buildings/resources, water, mountains).
-    if (occ && !this.footprintOpen(tileX, tileY, f, occ)) return false;
+    if (occ && !gateOnWall && !this.footprintOpen(tileX, tileY, f, occ)) return false;
     // You may only build on explored, currently-visible ground (no fog).
     if (!this.footprintVisible(tileX, tileY, f)) return false;
+    if (gateOnWall) return true;
     // Never inside enemy territory.
     if (footprintTouchesTerritory(this.enemyTerritorySources(), tileX, tileY, f)) return false;
     // TCs / camps go anywhere else; everything else needs your own territory.
@@ -939,6 +975,7 @@ export class Input {
     this.updateVillagerPanel();
     this.updateStancePanel();
     this.renderDiplo();
+    this.renderTrade();
     if (this.toastTimer > 0 && (this.toastTimer -= 1) === 0) this.toastEl.classList.remove('show');
   }
 
@@ -1010,12 +1047,12 @@ export class Input {
     const roster = this.state.diplo ?? [];
     const hasIncoming = roster.some((d) => d.offer === 'in');
     const open = !this.diploModal.classList.contains('hidden');
-    const key = `${open}|${hasIncoming}|` + roster.map((d) => `${d.id}:${d.relation}:${d.offer ?? ''}`).join(',');
+    const key = `${open}|${this.tradeTab}|${hasIncoming}|` + roster.map((d) => `${d.id}:${d.relation}:${d.offer ?? ''}`).join(',');
     if (key === this.diploKey) return;
     this.diploKey = key;
     this.diploBtn.classList.toggle('alert', hasIncoming);
     this.diploBtn.textContent = hasIncoming ? '🤝 Diplomacy !' : '🤝 Diplomacy';
-    if (!open) return;
+    if (!open || this.tradeTab) return;
 
     if (roster.length === 0) {
       this.diploList.innerHTML = `<div class="dp-empty">No other players known yet. Others appear here when they join the world.</div>`;
@@ -1062,6 +1099,172 @@ export class Input {
         }
       });
     }
+  }
+
+  // --- trade tab: route manager + known markets -------------------------------
+  private selectedCaravans(): number[] {
+    const out: number[] = [];
+    for (const id of this.state.selection) {
+      const e = this.state.entities.get(id);
+      if (e && e.view.owner === this.state.playerId && e.view.kind === 'caravan') out.push(id);
+    }
+    return out;
+  }
+
+  // Every market the player currently knows about: their own plus any other
+  // player's market they've discovered (the server keeps discovered markets in
+  // the entity stream even through fog). Own markets first, then by owner.
+  private knownMarkets(): Array<{ id: number; x: number; y: number; owner: number | null }> {
+    const out: Array<{ id: number; x: number; y: number; owner: number | null }> = [];
+    for (const e of this.state.entities.values()) {
+      const v = e.view;
+      if (v.kind !== 'market' || v.build != null) continue; // only working markets
+      out.push({ id: v.id, x: v.x, y: v.y, owner: v.owner });
+    }
+    const mine = this.state.playerId;
+    out.sort((a, b) => {
+      const ao = a.owner === mine ? -1 : (a.owner ?? 1e9);
+      const bo = b.owner === mine ? -1 : (b.owner ?? 1e9);
+      return ao - bo || a.id - b.id;
+    });
+    return out;
+  }
+
+  // Centre the camera on a world point and close the modal so the map shows.
+  private zoomToWorld(x: number, y: number): void {
+    this.diploModal.classList.add('hidden');
+    this.centerCamera(x, y);
+    this.r.entities.ping(x, y, 0xffd24a);
+    sound.play('click');
+  }
+
+  // A market's display label: whose it is, coloured dot included by the caller.
+  private marketLabel(owner: number | null): string {
+    if (owner === this.state.playerId) return 'Your market';
+    if (owner == null) return 'Abandoned market';
+    const name = this.state.playerName(owner);
+    return name ? `${escapeHtml(name)}’s market` : `Player ${owner}’s market`;
+  }
+
+  private renderTrade(): void {
+    const open = !this.diploModal.classList.contains('hidden');
+    if (!open || !this.tradeTab) return;
+    const routes = this.state.routes ?? [];
+    const markets = this.knownMarkets();
+    const caravans = this.selectedCaravans();
+    const key = JSON.stringify([routes, this.routeDraft, caravans.length, markets.map((m) => `${m.id}:${m.owner}`)]);
+    if (key === this.tradeKey) return;
+    this.tradeKey = key;
+
+    const dot = (owner: number | null): string =>
+      `<span class="tp-dot" style="background:#${(owner != null ? ownerColor(owner) : 0x888888).toString(16).padStart(6, '0')}"></span>`;
+    const coords = (x: number, y: number): string => `${Math.floor(x / TILE)}, ${Math.floor(y / TILE)}`;
+    const parts: string[] = [];
+
+    // --- your routes ---------------------------------------------------------
+    parts.push(`<div class="tp-label">Your trade routes</div>`);
+    if (routes.length === 0) {
+      parts.push(`<div class="tp-empty">No routes yet. Pick 2–8 market stops below — at least one must belong to another player (you cannot trade with yourself).</div>`);
+    }
+    for (const r of routes) {
+      const stopsTxt = r.stops.map((s, i) => `${dot(s.owner)}<span class="tp-chip">${i + 1}. ${this.marketLabel(s.owner)}</span>`).join('');
+      parts.push(
+        `<div class="tp-row" data-route="${r.id}">` +
+        `<span class="tp-name">Route #${r.id} <span class="tp-sub">· ${r.stops.length} stops · 🪙~${r.gold}/circuit · 🐫${r.caravans}</span><br>${stopsTxt}</span>` +
+        `<button class="tp-btn tp-zoom" data-x="${r.stops[0]?.x ?? 0}" data-y="${r.stops[0]?.y ?? 0}">🔍 Zoom</button>` +
+        `<button class="tp-btn good tp-assign" data-route="${r.id}"${caravans.length === 0 ? ' disabled' : ''}>＋ Assign ${caravans.length || ''}</button>` +
+        `<button class="tp-btn danger tp-delroute" data-route="${r.id}">✖</button>` +
+        `</div>`,
+      );
+    }
+    if (caravans.length === 0 && routes.length > 0)
+      parts.push(`<div class="tp-empty">Select caravans on the map to assign them to a route.</div>`);
+
+    // --- route builder draft ---------------------------------------------------
+    parts.push(`<div class="tp-label">New route</div>`);
+    const draftStops = this.routeDraft
+      .map((id) => this.state.entities.get(id)?.view)
+      .filter((v) => v != null);
+    const hasForeign = draftStops.some((v) => v!.owner !== this.state.playerId);
+    const canCreate = draftStops.length >= 2 && hasForeign;
+    const chips = draftStops.map((v, i) => `<span class="tp-chip">${i + 1}. ${this.marketLabel(v!.owner ?? null)}</span>`).join('');
+    parts.push(
+      `<div class="tp-draft">` +
+      (chips || `<span class="tp-sub">Add stops from the market list below (in visiting order).</span>`) +
+      `<div class="tp-actions">` +
+      `<button class="tp-btn good" id="tp-create"${canCreate ? '' : ' disabled'}>✔ Create route${caravans.length > 0 ? ` + assign ${caravans.length}` : ''}</button>` +
+      `<button class="tp-btn" id="tp-clear"${this.routeDraft.length === 0 ? ' disabled' : ''}>Clear</button>` +
+      `</div>` +
+      (draftStops.length >= 2 && !hasForeign ? `<div class="tp-sub" style="margin-top:4px">⚠ Needs at least one other player’s market.</div>` : '') +
+      `</div>`,
+    );
+
+    // --- known markets ---------------------------------------------------------
+    parts.push(`<div class="tp-label">Known markets</div>`);
+    if (markets.length === 0) {
+      parts.push(`<div class="tp-empty">No markets known. Build one, or scout other players’ towns to discover theirs.</div>`);
+    }
+    for (const m of markets) {
+      const last = this.routeDraft[this.routeDraft.length - 1];
+      const addDisabled = this.routeDraft.length >= 8 || last === m.id;
+      parts.push(
+        `<div class="tp-row">` +
+        dot(m.owner) +
+        `<span class="tp-name">${this.marketLabel(m.owner)} <span class="tp-sub">· tile ${coords(m.x, m.y)}</span></span>` +
+        `<button class="tp-btn tp-zoom" data-x="${m.x}" data-y="${m.y}">🔍 Zoom</button>` +
+        `<button class="tp-btn good tp-addstop" data-id="${m.id}"${addDisabled ? ' disabled' : ''}>＋ Stop</button>` +
+        `</div>`,
+      );
+    }
+
+    this.tradePanel.innerHTML = parts.join('');
+
+    // Wiring.
+    for (const btn of this.tradePanel.querySelectorAll('.tp-zoom')) {
+      btn.addEventListener('click', () => {
+        const el = btn as HTMLElement;
+        this.zoomToWorld(Number(el.dataset.x), Number(el.dataset.y));
+      });
+    }
+    for (const btn of this.tradePanel.querySelectorAll('.tp-addstop')) {
+      btn.addEventListener('click', () => {
+        const id = Number((btn as HTMLElement).dataset.id);
+        if (this.routeDraft.length >= 8) return;
+        this.routeDraft.push(id);
+        sound.play('click');
+        this.renderTrade();
+      });
+    }
+    for (const btn of this.tradePanel.querySelectorAll('.tp-assign')) {
+      btn.addEventListener('click', () => {
+        const routeId = Number((btn as HTMLElement).dataset.route);
+        const ids = this.selectedCaravans();
+        if (ids.length === 0) return;
+        this.net.send({ t: 'tradeRoute', action: 'assign', routeId, caravanIds: ids });
+        this.showToast(`${ids.length} caravan${ids.length === 1 ? '' : 's'} assigned to route #${routeId}`);
+        sound.play('rally');
+      });
+    }
+    for (const btn of this.tradePanel.querySelectorAll('.tp-delroute')) {
+      btn.addEventListener('click', () => {
+        const routeId = Number((btn as HTMLElement).dataset.route);
+        this.askConfirm('Delete route?', `Delete trade route #${routeId}? Its caravans will stop and wait for new orders.`, () => {
+          this.net.send({ t: 'tradeRoute', action: 'delete', routeId });
+        });
+      });
+    }
+    this.tradePanel.querySelector('#tp-create')?.addEventListener('click', () => {
+      const stops = [...this.routeDraft];
+      if (stops.length < 2) return;
+      this.net.send({ t: 'tradeRoute', action: 'create', stops, caravanIds: this.selectedCaravans() });
+      this.routeDraft = [];
+      this.showToast('trade route created');
+      sound.play('rally');
+    });
+    this.tradePanel.querySelector('#tp-clear')?.addEventListener('click', () => {
+      this.routeDraft = [];
+      this.renderTrade();
+    });
   }
 
   // --- stance/formation panel (bottom-centre) --------------------------------
@@ -1308,15 +1511,15 @@ export class Input {
       parts.push(`<div class="ip-row">🧰 job: ${jobName}</div>`);
     }
 
-    // Caravan: the active trade route and its payout.
+    // Caravan: the assigned trade route and its payout.
     if (v.kind === 'caravan' && owned) {
       if (v.trade) {
-        const targetMkt = this.state.entities.get(v.trade.target);
-        const whose = targetMkt ? this.whoLabel(targetMkt.view.owner) : (v.trade.foreign ? 'another player' : 'your own market');
-        parts.push(`<div class="ip-row">🛒 trading with ${whose}</div>`);
-        parts.push(`<div class="ip-row">🪙 ${v.trade.gold} gold per delivery${v.trade.foreign ? ' (+50% foreign bonus)' : ''}</div>`);
+        const nextMkt = this.state.entities.get(v.trade.next);
+        const whose = nextMkt ? this.whoLabel(nextMkt.view.owner) : 'a market';
+        parts.push(`<div class="ip-row">🛒 route #${v.trade.route} — heading to ${whose}</div>`);
+        parts.push(`<div class="ip-row">🪙 ~${v.trade.gold} gold per circuit</div>`);
       } else {
-        parts.push(`<div class="ip-row dim">No trade route — right-click a market. Another player’s market pays +50%.</div>`);
+        parts.push(`<div class="ip-row dim">No trade route — right-click another player’s market, or manage routes in 🤝 → Trade.</div>`);
       }
     }
 

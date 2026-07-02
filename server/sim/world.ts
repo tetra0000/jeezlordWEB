@@ -19,6 +19,7 @@ import type {
   Gatherer,
   Movement,
   PlayerState,
+  TradeRoute,
   Trader,
   TrainItem,
 } from './components.js';
@@ -58,8 +59,14 @@ export class World {
   readonly gateTiles = new Map<number, EntityId>();
   readonly combat = new Map<EntityId, CombatState>();
   readonly resourceAmount = new Map<EntityId, number>();
-  // Caravans' trade routes (see systems/trade.ts).
+  // Caravans' route assignments (see systems/trade.ts).
   readonly trader = new Map<EntityId, Trader>();
+  // Trade routes: ordered loops of market stops caravans cycle through.
+  // Persisted in the trade_routes table; `routesDirty` flags the (small) set for
+  // a full rewrite on the next flush, like diplomacy.
+  readonly tradeRoutes = new Map<number, TradeRoute>();
+  nextRouteId = 1;
+  routesDirty = false;
   // Dead units' bodies (kind === 'corpse'): decorative, neutral, decaying.
   readonly corpses = new Map<EntityId, Corpse>();
 
@@ -122,6 +129,10 @@ export class World {
   // nodes stay visible through fog (AoE-style "explored" memory). In-memory only
   // — re-discovered cheaply after a restart.
   readonly discoveredResources = new Map<PlayerId, Set<EntityId>>();
+  // Markets each player has discovered. Same AoE-style memory as resources —
+  // once seen, a market stays on your map (and is a legal trade-route stop) even
+  // out of vision. In-memory only, like discoveredResources.
+  readonly discoveredMarkets = new Map<PlayerId, Set<EntityId>>();
 
   // Players with admin mode enabled (toggled by renaming a town center to
   // "adminmode"), and the subset with full-map reveal active. Both in-memory
@@ -379,17 +390,14 @@ export class World {
       if (cs) v.stance = cs.stance;
     }
 
-    // Caravan trade route + per-delivery gold (owner-only; stripped in snapshot).
+    // Caravan route assignment + estimated circuit gold (owner-only; stripped
+    // in snapshot).
     if (kind === 'caravan') {
       const tr = this.trader.get(id);
-      if (tr && tr.homeId != null && tr.targetId != null) {
-        const h = this.transform.get(tr.homeId);
-        const t = this.transform.get(tr.targetId);
-        if (h && t) {
-          const foreign = this.owner.get(tr.targetId) !== this.owner.get(id);
-          const distTiles = Math.hypot(t.x - h.x, t.y - h.y) / TILE;
-          v.trade = { home: tr.homeId, target: tr.targetId, gold: caravanGold(distTiles, foreign), foreign };
-        }
+      const route = tr?.routeId != null ? this.tradeRoutes.get(tr.routeId) : undefined;
+      if (tr && route && route.stops.length > 0) {
+        const next = route.stops[Math.min(tr.stopIndex, route.stops.length - 1)];
+        v.trade = { route: route.id, next, gold: this.routeCircuitGold(route) };
       }
     }
 
@@ -446,6 +454,24 @@ export class World {
 
   *entityIds(): IterableIterator<EntityId> {
     yield* this.kind.keys();
+  }
+
+  // Estimated gold one caravan earns per full circuit of a route: the sum of
+  // caravanGold over each leg that ARRIVES at a foreign stop (own stops pay
+  // nothing — you cannot trade with yourself).
+  routeCircuitGold(route: TradeRoute): number {
+    let gold = 0;
+    const n = route.stops.length;
+    for (let i = 0; i < n; i++) {
+      const to = route.stops[i];
+      if (this.owner.get(to) === route.owner) continue;
+      const from = route.stops[(i - 1 + n) % n];
+      const a = this.transform.get(from);
+      const b = this.transform.get(to);
+      if (!a || !b) continue;
+      gold += caravanGold(Math.hypot(b.x - a.x, b.y - a.y) / TILE);
+    }
+    return gold;
   }
 
   // A building is "operational" if it isn't an incomplete construction.

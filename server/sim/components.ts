@@ -75,12 +75,22 @@ export interface Corpse {
   age: number; // sim-seconds since death
 }
 
-// A caravan's trade route. The caravan shuttles home -> target -> home,
-// depositing gold with the owner each time it arrives home. Persisted.
+// A caravan's route assignment. The caravan cycles through its route's market
+// stops; arriving at a FOREIGN stop pays gold scaled by the leg it just
+// travelled (own stops pay nothing — no trading with yourself). Persisted.
 export interface Trader {
-  state: 'idle' | 'outbound' | 'homebound';
-  homeId: EntityId | null; // own market the gold is delivered to
-  targetId: EntityId | null; // market being traded with (own far market or another player's)
+  state: 'idle' | 'enroute';
+  routeId: number | null; // World.tradeRoutes key
+  stopIndex: number; // index of the stop currently being headed for
+  lastStopId: EntityId | null; // stop last departed (leg-length basis for payouts)
+}
+
+// A trade route: an owned, ordered loop of market stops caravans are assigned
+// to. Kept in World.tradeRoutes; persisted in the trade_routes table.
+export interface TradeRoute {
+  id: number;
+  owner: PlayerId;
+  stops: EntityId[]; // 2..TRADE_ROUTE_MAX_STOPS market entity ids
 }
 
 export interface CombatState {

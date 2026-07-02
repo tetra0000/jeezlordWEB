@@ -184,24 +184,29 @@ button:active {
   padding: 6px 10px;
 }
 
+/* Build/train menu: a vertical column pinned to the RIGHT edge (v13), between
+   the coords/diplomacy buttons up top and the info panel + minimap below. */
 #command-panel {
   position: absolute;
-  bottom: 10px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 88px;
+  right: 10px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: center;
-  max-width: 70vw;
+  flex-direction: column;
+  gap: 5px;
+  width: 138px;
+  max-height: calc(100vh - 480px);
+  overflow-y: auto;
+  scrollbar-width: thin;
   pointer-events: auto;
 }
 #command-panel button {
-  background: #1c241c;
+  width: 100%;
+  text-align: left;
+  background: #1c241ce6;
   border: 1px solid #4a5a4a;
   color: #dfe;
   border-radius: 6px;
-  padding: 6px 10px;
+  padding: 5px 9px;
   font-size: 13px;
   cursor: pointer;
   line-height: 1.3;
@@ -259,9 +264,121 @@ button:active {
   pointer-events: auto;
 }
 .modal.diplo {
-  width: 420px;
-  max-height: 70vh;
+  width: 460px;
+  max-height: 74vh;
   overflow-y: auto;
+}
+/* Diplomacy/Trade tab strip at the top of the modal. */
+.dp-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #2a342a;
+  padding-bottom: 8px;
+}
+.dp-tab {
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #9ab;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dp-tab.active {
+  background: #2a362a;
+  color: #ffe08a;
+  border-color: #8ad06a;
+}
+
+/* Trade tab: known markets, the route builder draft, and the routes list. */
+#trade-panel .tp-label {
+  color: #789;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 10px 0 4px;
+}
+#trade-panel .tp-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #2a342a;
+}
+#trade-panel .tp-row:last-child {
+  border-bottom: none;
+}
+#trade-panel .tp-name {
+  flex: 1;
+  color: #dfe;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#trade-panel .tp-sub {
+  color: #789;
+  font-size: 11px;
+}
+#trade-panel .tp-btn {
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  color: #dfe;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex: none;
+  white-space: nowrap;
+}
+#trade-panel .tp-btn:hover:not(:disabled) {
+  background: #2a362a;
+}
+#trade-panel .tp-btn.good {
+  border-color: #6ad06a;
+}
+#trade-panel .tp-btn.danger {
+  border-color: #a05050;
+  color: #ffd9d9;
+}
+#trade-panel .tp-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#trade-panel .tp-empty {
+  color: #789;
+  font-size: 12px;
+  padding: 6px 4px;
+}
+#trade-panel .tp-draft {
+  background: #182018;
+  border: 1px dashed #4a5a4a;
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 4px;
+}
+#trade-panel .tp-chip {
+  display: inline-block;
+  background: #1c241c;
+  border: 1px solid #4a5a4a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #dfe;
+  margin: 2px 3px 2px 0;
+}
+#trade-panel .tp-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid #0008;
+  flex: none;
+}
+#trade-panel .tp-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
 }
 #diplo-list .dp-row {
   display: flex;
@@ -344,7 +461,7 @@ button:active {
    military squads are selected. */
 #stance-panel {
   position: absolute;
-  bottom: 108px; /* clear of the build palette, which wraps to two rows */
+  bottom: 10px; /* the build palette moved to the right edge, so the floor is free */
   left: 50%;
   transform: translateX(-50%);
   display: flex;

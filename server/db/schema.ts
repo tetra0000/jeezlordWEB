@@ -115,12 +115,26 @@ export function initSchema(db: DatabaseSync): void {
       wear REAL NOT NULL
     );
 
-    -- Caravan trade routes (home/target market entity ids).
+    -- Caravan route assignments (which trade route, which stop is next, and the
+    -- stop last departed — the leg-length basis for the next payout). The
+    -- legacy home_id/target_id columns are from the pre-routes system (v11) and
+    -- are no longer read.
     CREATE TABLE IF NOT EXISTS ent_trade (
-      entity_id INTEGER PRIMARY KEY,
-      state     TEXT NOT NULL,
-      home_id   INTEGER,
-      target_id INTEGER
+      entity_id  INTEGER PRIMARY KEY,
+      state      TEXT NOT NULL,
+      home_id    INTEGER,
+      target_id  INTEGER,
+      route_id   INTEGER,
+      stop_index INTEGER,
+      last_stop  INTEGER
+    );
+
+    -- Trade routes: an owned, ordered loop of market stops (JSON array of
+    -- entity ids) that caravans are assigned to.
+    CREATE TABLE IF NOT EXISTS trade_routes (
+      id         INTEGER PRIMARY KEY,
+      owner      INTEGER NOT NULL,
+      stops_json TEXT NOT NULL
     );
 
     -- Military squad stance (aggressive/defensive/standGround/noAttack).
@@ -171,6 +185,15 @@ export function initSchema(db: DatabaseSync): void {
   const metaCols = db.prepare(`PRAGMA table_info(ent_building_meta)`).all() as Array<{ name: string }>;
   if (!metaCols.some((c) => c.name === 'gate_mode')) {
     db.exec(`ALTER TABLE ent_building_meta ADD COLUMN gate_mode TEXT`);
+  }
+
+  // v13 migration: add the trade-route columns to a pre-routes ent_trade table.
+  // Old home/target shuttles are not migrated — those caravans simply go idle.
+  const tradeCols = db.prepare(`PRAGMA table_info(ent_trade)`).all() as Array<{ name: string }>;
+  if (!tradeCols.some((c) => c.name === 'route_id')) {
+    db.exec(`ALTER TABLE ent_trade ADD COLUMN route_id INTEGER`);
+    db.exec(`ALTER TABLE ent_trade ADD COLUMN stop_index INTEGER`);
+    db.exec(`ALTER TABLE ent_trade ADD COLUMN last_stop INTEGER`);
   }
 
   // Stamp / verify schema version.

@@ -37,7 +37,7 @@ export function spawnUnit(
   if (kind === 'villager')
     world.gatherer.set(id, { state: 'idle', carrying: 0, carryType: null, nodeId: null, job: 'builder', idleTime: 0 });
   if (kind === 'caravan')
-    world.trader.set(id, { state: 'idle', homeId: null, targetId: null });
+    world.trader.set(id, { state: 'idle', routeId: null, stopIndex: 0, lastStopId: null });
   return id;
 }
 

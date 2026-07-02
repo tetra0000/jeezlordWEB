@@ -23,6 +23,17 @@ export const TERRAIN_BEACH = 5;
 // as organic blobs across the grassland. PASSABLE exactly like grass.
 export const TERRAIN_DIRT = 6;
 export const TERRAIN_FLOWERS = 7;
+// Long grass: tall meadow blobs on open grassland. Passable, cosmetic.
+export const TERRAIN_LONGGRASS = 8;
+// Swamp: boggy lowland near water. PASSABLE but debuffed — units move at
+// SWAMP_SPEED_MULT and fight at SWAMP_ATTACK_MULT while standing in it
+// (see shared/stats.ts; applied in movement.ts / combat.ts).
+export const TERRAIN_SWAMP = 9;
+// Rocky scree: small scattered rock outcrops for ground variety. Passable.
+export const TERRAIN_ROCKS = 10;
+// Mountain pass: the walkable rocky floor of a pass punched through a range —
+// reads as bare rock, not grass. Passable exactly like grass.
+export const TERRAIN_PASS = 11;
 
 export const TICK_HZ = 10; // authoritative simulation rate
 export const TICK_MS = 1000 / TICK_HZ;

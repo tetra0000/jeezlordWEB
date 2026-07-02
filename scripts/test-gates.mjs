@@ -7,7 +7,7 @@
 import { World } from '../dist/server/sim/world.js';
 import { spawnUnit, spawnBuilding } from '../dist/server/sim/spawn.js';
 import { findPath } from '../dist/server/sim/systems/pathfinding.js';
-import { tradeSystem, assignTradeRoute } from '../dist/server/sim/systems/trade.js';
+import { tradeSystem, quickTradeRoute } from '../dist/server/sim/systems/trade.js';
 import { dispatch } from '../dist/server/net/dispatch.js';
 import { TILE } from '../dist/shared/constants.js';
 import { ROAD_LEVELS } from '../dist/shared/stats.js';
@@ -96,7 +96,8 @@ check('gate mode is on the wire view', world.view(gate).gate === 'locked');
 const mkA = spawnBuilding(world, 'market', 1, 100, 100, false);
 const mkB = spawnBuilding(world, 'market', 2, 200, 100, false);
 const cv = spawnUnit(world, 'caravan', 1, 101 * TILE, 102 * TILE);
-check('route assigned', assignTradeRoute(world, cv, mkB) === null);
+world.discoveredMarkets.set(1, new Set([mkB])); // the snapshot would record this
+check('route assigned', quickTradeRoute(world, cv, mkB) === null);
 const cvTile = world.tileIndex(101, 102);
 for (let i = 0; i < 50; i++) tradeSystem(world, 1); // 50 sim-seconds standing on one tile
 const wear = world.roadWear.get(cvTile) ?? 0;
@@ -110,6 +111,27 @@ const idleCv = spawnUnit(world, 'caravan', 1, 110 * TILE, 110 * TILE);
 tradeSystem(world, 100);
 check('idle caravan wears nothing', !world.roadWear.has(world.tileIndex(110, 110)));
 void idleCv;
+
+// --- gate placed over an own wall ---------------------------------------------------
+// Building a gate on a tile holding one of your own COMPLETED walls replaces
+// the wall with a gate foundation (full gate cost, wall not refunded).
+world.players.get(1).stockpile.stone = 500;
+world.players.get(1).stockpile.wood = 500;
+const wallTileX = 12, wallTileY = 10; // one of the wall segments laid above
+const wallAt = (tx, ty) => [...world.owner.keys()].find((id) =>
+  world.kind.get(id) === 'wall' &&
+  Math.floor(world.transform.get(id).x / TILE) === tx && Math.floor(world.transform.get(id).y / TILE) === ty);
+check('a wall stands on the target tile', wallAt(wallTileX, wallTileY) != null);
+dispatch(ctx, session(1), { t: 'build', kind: 'gate', tileX: wallTileX, tileY: wallTileY });
+check('the wall is torn down', wallAt(wallTileX, wallTileY) == null);
+const newGate = [...world.owner.keys()].find((id) =>
+  world.kind.get(id) === 'gate' &&
+  Math.floor(world.transform.get(id).x / TILE) === wallTileX && Math.floor(world.transform.get(id).y / TILE) === wallTileY);
+check('a gate foundation replaces it', newGate != null && !world.isOperational(newGate));
+check('the new gate tile is registered', world.gateTiles.get(world.tileIndex(wallTileX, wallTileY)) === newGate);
+const sEnemy = session(3);
+dispatch(ctx, sEnemy, { t: 'build', kind: 'gate', tileX: 13, tileY: 10 });
+check('a stranger cannot gate YOUR wall', sEnemy.rejects.length === 1);
 
 // --- line move orders ---------------------------------------------------------------
 const squads = [];

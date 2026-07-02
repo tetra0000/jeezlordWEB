@@ -10,7 +10,7 @@
 import { Container, Graphics, Sprite, TilingSprite } from 'pixi.js';
 import {
   TERRAIN_GRASS, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
-  TERRAIN_DIRT, TERRAIN_FLOWERS,
+  TERRAIN_DIRT, TERRAIN_FLOWERS, TERRAIN_LONGGRASS, TERRAIN_SWAMP, TERRAIN_ROCKS, TERRAIN_PASS,
 } from '../../../shared/constants.js';
 import type { Viewport } from './entities.js';
 import { tex } from './assets.js';
@@ -25,6 +25,10 @@ const TILE_TEX: Record<number, string> = {
   [TERRAIN_BEACH]: 'tile_beach',
   [TERRAIN_DIRT]: 'tile_dirt',
   [TERRAIN_FLOWERS]: 'tile_flowers',
+  [TERRAIN_LONGGRASS]: 'tile_longgrass',
+  [TERRAIN_SWAMP]: 'tile_swamp',
+  [TERRAIN_ROCKS]: 'tile_rocks',
+  [TERRAIN_PASS]: 'tile_pass',
 };
 const TILE_FALLBACK: Record<number, number> = {
   [TERRAIN_WATER]: 0x2c5a86,
@@ -34,6 +38,10 @@ const TILE_FALLBACK: Record<number, number> = {
   [TERRAIN_BEACH]: 0xd9c89a,
   [TERRAIN_DIRT]: 0x8a744e,
   [TERRAIN_FLOWERS]: 0x5a7a3e,
+  [TERRAIN_LONGGRASS]: 0x406432,
+  [TERRAIN_SWAMP]: 0x3e4a30,
+  [TERRAIN_ROCKS]: 0x8c8c94,
+  [TERRAIN_PASS]: 0x706a64,
 };
 
 interface Chunk {
@@ -99,11 +107,23 @@ export class TileLayer {
 
         // Non-grass terrain tiles inside this chunk.
         if (terrain) {
+          // Mountains autotile: pick the variant from which 4-neighbours are
+          // also mountain (bit 1 = N, 2 = E, 4 = S, 8 = W), so a range reads as
+          // one connected massif with lit ridges and cliff-shadow edges.
+          const mountainMask = (tx: number, ty: number): number => {
+            const at = (x: number, y: number): boolean =>
+              x >= 0 && y >= 0 && x < mapTiles && y < mapTiles && terrain[y * mapTiles + x] === TERRAIN_MOUNTAIN;
+            return (at(tx, ty - 1) ? 1 : 0) | (at(tx + 1, ty) ? 2 : 0) | (at(tx, ty + 1) ? 4 : 0) | (at(tx - 1, ty) ? 8 : 0);
+          };
           for (let ty = ty0; ty < ty1; ty++) {
             for (let tx = tx0; tx < tx1; tx++) {
               const code = terrain[ty * mapTiles + tx];
-              const texName = TILE_TEX[code];
+              let texName = TILE_TEX[code];
               if (!texName) continue;
+              if (code === TERRAIN_MOUNTAIN) {
+                const masked = 'tile_mountain_' + mountainMask(tx, ty);
+                if (tex[masked]) texName = masked;
+              }
               const t = tex[texName];
               if (t) {
                 const s = new Sprite(t);
@@ -131,7 +151,7 @@ export class TileLayer {
               const tx = tx0 + Math.floor(drnd() * (tx1 - tx0));
               const ty = ty0 + Math.floor(drnd() * (ty1 - ty0));
               const code = terrain[ty * mapTiles + tx];
-              if (code !== TERRAIN_GRASS && code !== TERRAIN_DIRT && code !== TERRAIN_FLOWERS) continue;
+              if (code !== TERRAIN_GRASS && code !== TERRAIN_DIRT && code !== TERRAIN_FLOWERS && code !== TERRAIN_LONGGRASS) continue;
               const t = tex[DECOR[Math.floor(drnd() * DECOR.length)]];
               if (!t) continue;
               const s = new Sprite(t);

@@ -5,6 +5,7 @@ import { World } from '../dist/server/sim/world.js';
 import { seedWorld } from '../dist/server/sim/worldgen.js';
 import {
   MAP_TILES, TERRAIN_WATER, TERRAIN_BRIDGE, TERRAIN_MOUNTAIN, TERRAIN_MUD, TERRAIN_BEACH,
+  TERRAIN_LONGGRASS, TERRAIN_SWAMP, TERRAIN_ROCKS, TERRAIN_PASS,
 } from '../dist/shared/constants.js';
 
 const N = MAP_TILES;
@@ -67,25 +68,38 @@ function bridgesOverLakes(world) {
 
 const SEEDS = 6;
 let mudSeeds = 0, beachSeeds = 0, minNodes = Infinity, lakeBridgeTotal = 0, allConnected = true;
+let swampSeeds = 0, longgrassSeeds = 0, rocksSeeds = 0, passSeeds = 0;
 for (let s = 0; s < SEEDS; s++) {
   const world = new World();
   seedWorld(world);
-  let mud = 0, beach = 0;
+  let mud = 0, beach = 0, swamp = 0, longgrass = 0, rocks = 0, pass = 0;
   for (let i = 0; i < world.terrain.length; i++) {
     if (world.terrain[i] === TERRAIN_MUD) mud++;
     else if (world.terrain[i] === TERRAIN_BEACH) beach++;
+    else if (world.terrain[i] === TERRAIN_SWAMP) swamp++;
+    else if (world.terrain[i] === TERRAIN_LONGGRASS) longgrass++;
+    else if (world.terrain[i] === TERRAIN_ROCKS) rocks++;
+    else if (world.terrain[i] === TERRAIN_PASS) pass++;
   }
   const nodes = [...world.entityIds()].length;
   if (mud > 0) mudSeeds++;
   if (beach > 0) beachSeeds++;
+  if (swamp > 0) swampSeeds++;
+  if (longgrass > 0) longgrassSeeds++;
+  if (rocks > 0) rocksSeeds++;
+  if (pass > 0) passSeeds++;
   minNodes = Math.min(minNodes, nodes);
   if (!fullyConnected(world)) allConnected = false;
   lakeBridgeTotal += bridgesOverLakes(world);
-  console.log(`seed ${s}: ${nodes} nodes, ${mud} mud, ${beach} beach`);
+  console.log(`seed ${s}: ${nodes} nodes, ${mud} mud, ${beach} beach, ${swamp} swamp, ${longgrass} longgrass, ${rocks} rocks, ${pass} pass`);
 }
 
 check('mud appears along rivers (every seed)', mudSeeds === SEEDS, `mudSeeds=${mudSeeds}/${SEEDS}`);
 check('beaches appear at points (every seed)', beachSeeds === SEEDS, `beachSeeds=${beachSeeds}/${SEEDS}`);
+check('swamps appear near water (every seed)', swampSeeds === SEEDS, `swampSeeds=${swampSeeds}/${SEEDS}`);
+check('long grass appears (every seed)', longgrassSeeds === SEEDS, `longgrassSeeds=${longgrassSeeds}/${SEEDS}`);
+check('rock outcrops appear (every seed)', rocksSeeds === SEEDS, `rocksSeeds=${rocksSeeds}/${SEEDS}`);
+check('rocky mountain passes appear (every seed)', passSeeds === SEEDS, `passSeeds=${passSeeds}/${SEEDS}`);
 // Sanity floor: the map is well-resourced even on water/mountain-heavy seeds
 // (clusters are a clean +50%; multi-lobe woods add the rest).
 check('map is well-resourced', minNodes >= 5000, `minNodes=${minNodes}`);

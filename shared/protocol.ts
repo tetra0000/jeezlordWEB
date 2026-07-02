@@ -14,6 +14,7 @@ import type {
   Shot,
   Stance,
   Stockpile,
+  TradeRouteView,
   VillagerJob,
 } from './types.js';
 
@@ -141,14 +142,30 @@ export interface DiplomacyMsg {
   playerId: PlayerId; // the other player
 }
 
-// Send owned caravans to trade with a market: another player's market (any
-// distance) or one of your own far-away markets. The caravan's home becomes
-// your market nearest to it; it then shuttles the route earning gold per
-// delivery (+50% when the target market belongs to another player).
+// Quick-route a caravan (right-click a market): creates (or reuses) a two-stop
+// route from the caravan's nearest own market to the clicked market and assigns
+// the caravans to it. The target must be ANOTHER player's market — you cannot
+// trade with yourself.
 export interface TradeMsg {
   t: 'trade';
   caravanIds: EntityId[];
   marketId: EntityId;
+}
+
+// Manage trade routes (the Trade menu):
+//  - create: `stops` is an ordered list of 2..TRADE_ROUTE_MAX_STOPS market
+//    entity ids the route loops through. At least one stop must belong to
+//    another player (no trading with yourself); stops must be markets you have
+//    discovered and whose owners you are not at war with.
+//  - delete: remove an owned route (its caravans go idle).
+//  - assign: put owned caravans on an owned route (routeId), or take them off
+//    (routeId omitted).
+export interface TradeRouteMsg {
+  t: 'tradeRoute';
+  action: 'create' | 'delete' | 'assign';
+  routeId?: number;
+  stops?: EntityId[];
+  caravanIds?: EntityId[];
 }
 
 // Set the stance of one or more owned military squads (how they auto-engage).
@@ -213,6 +230,7 @@ export type ClientMsg =
   | GateMsg
   | DiplomacyMsg
   | TradeMsg
+  | TradeRouteMsg
   | StanceMsg
   | StopMsg
   | DeleteMsg
@@ -276,6 +294,9 @@ export interface DeltaMsg {
   // Your diplomacy roster (relation + pending offers with every other player).
   // Sent when it changes; the client diffs it for "X declared war!" toasts.
   diplo?: DiploEntry[];
+  // Your trade routes (stops + assigned-caravan counts). Owner-only; sent when
+  // it changes. Drives the Trade menu.
+  routes?: TradeRouteView[];
   // Caravan road-wear increments this tick: [tileIndex, newLevel] pairs.
   // Cosmetic, public (like terrain) — fog still hides the ground visually.
   roads?: Array<[number, number]>;

@@ -37,33 +37,60 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
   the server spreads destinations (`formationTargets` in dispatch.ts). The
   bottom-centre stance/formation panel appears when squads are selected.
 
-## Trade caravans (v11)
+## Trade routes & caravans (v13)
 
 - Markets train `caravan` units (defenceless: `combatOf` returns null for
-  attack<=0). The `trade` intent routes caravans to a target market: another
-  player's market (any distance) or an own market ≥ `CARAVAN_MIN_OWN_TRADE_TILES`
-  away. Home = nearest own market. `trade.ts` shuttles home→target→home and
-  deposits `caravanGold(distTiles, foreign)` on each arrival home — foreign
-  markets pay +50% (`CARAVAN_FOREIGN_BONUS`). War with the target's owner cuts
-  the route; manual move/stop orders cancel it. Persisted in `ent_trade`.
-  Client: right-click a market with caravans selected.
+  attack<=0). Trade is organised as ROUTES: an owned, ordered loop of
+  2..`TRADE_ROUTE_MAX_STOPS` (8) market stops (`World.tradeRoutes`, persisted in
+  `trade_routes`; caravan assignment — route_id/stop_index/last_stop — in
+  `ent_trade`). Assigned caravans cycle the stops; arriving at a FOREIGN stop
+  pays `caravanGold(legTiles)` for the leg just travelled; own stops pay
+  nothing. **No trading with yourself:** a route with no other player's market
+  is rejected/dissolved. Stops must be discovered markets
+  (`World.discoveredMarkets` — snapshot.ts gives markets the same AoE fog
+  memory as resource nodes) whose owners you aren't at war with; a dead/at-war
+  stop is dropped each tick and a route left invalid dissolves, idling its
+  caravans (`reconcileRoutes` in trade.ts).
+- Wire: `tradeRoute` intent (create/delete/assign); per-player roster
+  `DeltaMsg.routes` (owner-only). The `trade` intent (right-click a FOREIGN
+  market with caravans selected) is a quick-route: creates/reuses the two-stop
+  route [nearest own market → target]. Manual move/stop cancels the assignment.
+- Client: the 🤝 modal is TABBED — the **Trade** tab (`renderTrade` in
+  input/commands.ts) lists your routes (zoom / assign selected caravans /
+  delete), a route-builder draft, and every known market with a "zoom to"
+  button.
+- `ARRIVE_DIST` is 2 tiles: markets block their 2x2 footprint, so the nearest
+  walkable tile centre is ~1.58 tiles from the centre — a smaller radius makes
+  a caravan jostled by station traffic bounce forever without ever "arriving".
 
-## Walls, gates & roads (v12)
+## Walls, gates & roads (v12, reworked v13)
 
 - **Walls are drag-buildable** (client-side: pointer-down anchors, Bresenham run
-  of 1-tile builds on release, filtered by an occupancy-aware `placementValid`).
+  of 1-tile builds on release, filtered by an occupancy-aware `placementValid`)
+  and **autotile**: the client picks `wall_<mask>` per segment from the
+  same-owner walls/gates on its 4 neighbours (bit 1=N, 2=E, 4=S, 8=W), so runs
+  join into one continuous curtain wall. The shared `team_wall` crest overlay
+  keeps the owner tint.
 - **Gates** are wall segments with a mode (`GateMode`: `locked` | `trade` |
   `open`, default trade = owner + allies + non-enemy caravans pass).
   Pathfinding is mover-aware: `world.isBlockedTileFor(tx, ty, moverId)` consults
   `World.gateTiles`/`gateMode` (+`gatePassable`); `findPath` takes the mover id.
   `gate` intent sets the mode (owner-only); mode is public on the wire
   (`EntityView.gate`); persisted in `ent_building_meta.gate_mode`. The client
-  swaps `gate`/`gate_open` textures and shows mode buttons in the info panel.
-- **Caravan roads:** caravans on active routes wear their tile (`trade.ts`
-  `wearRoad`, `ROAD_WEAR_PER_S`, cap 1). `World.roadWear` (sparse), persisted in
-  `road_wear`; full snapshot in `init.roads`, quantised increments
-  (`ROAD_LEVELS`) in `delta.roads` (public, like terrain). Client renders them
-  in `render/roads.ts` (alpha ∝ level). Purely cosmetic.
+  swaps `gate`/`gate_open` textures, rotates the sprite to sit in vertical wall
+  runs, and shows mode buttons in the info panel. **A gate may be placed ON one
+  of your own completed walls** — dispatch tears the wall down (no refund, full
+  gate cost) and skips the territory checks the standing wall already passed.
+- **Roads (no longer cosmetic):** caravans on active routes wear their tile
+  (`trade.ts` `wearRoad`, `ROAD_WEAR_PER_S`, cap 1). `World.roadWear` (sparse),
+  persisted in `road_wear`; full snapshot in `init.roads`, quantised increments
+  (`ROAD_LEVELS`) in `delta.roads` (public, like terrain). Mechanics: everyone
+  moves up to `ROAD_SPEED_BONUS` faster on worn road (movement.ts
+  `terrainSpeedMult`), and CARAVAN pathfinding discounts steps onto worn tiles
+  down to `ROAD_PATH_COST_MIN` (findPath scales its heuristic to match) — so
+  trade traffic converges onto shared roads and reinforces them. Client
+  (`render/roads.ts`): alpha ∝ level; heavy-wear tiles swap to the cobbled
+  `tile_road2` highway texture.
 
 ## Commanding & selection QoL (v12, all client-side except line moves)
 
@@ -115,11 +142,11 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
   `lumberjack`/`stonemason`/`goldminer`/`forager`/`farmer`.
 - **Capacity** is summed from operational buildings' `BuildingStat.jobSlots`:
   Town Center grants 2 each of lumberjack/stonemason/goldminer/forager + a
-  `gatherRadius` (the base camp); Lumber/Mining Camps add capacity for their job
-  and open a new gather radius; a **Mill** adds forager slots + radius (it's the
-  food/forage camp and the farm/berry food drop-off); each **Farm** grants exactly
-  1 farmer and IS that farmer's workplace. `assignJob` is clamped to capacity AND
-  to villagers available; the remainder are builders.
+  `gatherRadius` (the base camp); Lumber/Mining Camps add **5** slots for their
+  job(s) (v13) and open a new gather radius; a **Mill** adds forager slots +
+  radius (it's the food/forage camp and the farm/berry food drop-off); each
+  **Farm** grants exactly 1 farmer and IS that farmer's workplace. `assignJob`
+  is clamped to capacity AND to villagers available; the remainder are builders.
 - Gathering jobs find the nearest matching neutral node within a host building's
   `gatherRadius`; farmers bind 1:1 to a farm. A villager that can find no work
   accrues `idleTime` (sim-seconds); the per-player `JobReport` (owner-only, in the
@@ -148,9 +175,12 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 - **Farms are AoE2-style** (not a passive trickle): a villager harvests food from
   the farm's finite store (`resourceAmount`, seeded to `FARM_FOOD`) and hauls it
   to a food drop-off, like a resource node — the gather system special-cases
-  `kind === 'farm'` (food; 2×2 → wider approach range; doesn't vanish when empty).
-  An empty farm is **auto-reseeded** by `farm.ts` (spends `FARM_RESEED_COST` wood)
-  unless the owner toggles it off (`World.farmAuto`, per-farm `farmReseed` intent).
+  `kind === 'farm'` (food; doesn't vanish when empty). Farm tiles are `walkable`
+  (any unit may cross them) and since v13 the farmer works standing **ON** the
+  field: `nearTarget` requires the villager's tile to be inside the farm's
+  footprint (this also covers builders raising it). An empty farm is
+  **auto-reseeded** by `farm.ts` (spends `FARM_RESEED_COST` wood) unless the
+  owner toggles it off (`World.farmAuto`, per-farm `farmReseed` intent).
 
 ## Territory & construction
 
@@ -186,6 +216,13 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
   client tints with the owner colour — a child sprite per figure in
   `render/entities.ts`. Filenames are the contract. `tile_forestground.png` has
   no generator (don't add one); `logo.png` is hand-made.
+- **Autotiling masks (v13):** `wall_<0..15>`, `tree_<0..15>` and
+  `tile_mountain_<0..15>` are connection-mask variants (bit 1=N, 2=E, 4=S,
+  8=W). Walls/gates join to same-owner neighbours and trees to any adjacent
+  tree in `render/entities.ts` (which rebuilds a tile→wall/tree lookup each
+  frame); mountains are static and masked at chunk-build time in
+  `render/tiles.ts`. Connected tree variants draw at full tile size so canopies
+  meet; a lone tree (`tree_0`) keeps the classic sprite.
 - Grass gets a deterministic scatter of `decor_*` props per tile chunk
   (`render/tiles.ts`) so open ground isn't bare.
 - `render/assets.ts` loads them into `tex[kind]`; `render/entities.ts` draws a
@@ -216,9 +253,11 @@ Persistent shared-world RTS. Read this before editing; see the full roadmap at
 
 `jobs` (reconcile villager job assignments + auto-task each villager to a
 node/farm/foundation) → `pathfinding` (A* on the tile grid, bounded request
-queue) → `movement` (follows waypoints off-grid) → `separation` (ease crowds
-apart) → `gather` (villager harvest/haul/deposit, incl. farms) → `trade`
-(caravans arrive/turn around/deposit gold) → `farm` (auto-reseed empty farms) →
+queue; caravans discount worn-road steps) → `movement` (follows waypoints
+off-grid; swamp slows, roads speed up) → `separation` (ease crowds apart) →
+`gather` (villager harvest/haul/deposit, incl. farms) → `trade` (validate
+routes, cycle caravans through stops, pay foreign arrivals, wear roads) →
+`farm` (auto-reseed empty farms) →
 `construction` (advance only with builders present) → `territory` (grow TC radii)
 → `training` (queue drain + spawn) → `combat` (acquire/chase/attack/kill —
 war-relations + stances gate targeting; a dying UNIT leaves a neutral `corpse`
@@ -261,19 +300,29 @@ gather/farm rates, costs, vision). Adjust pacing there, never in system code.
   `test-combat.mjs` / `test-farm.mjs` / `test-territory.mjs` /
   `test-resources.mjs` — end-to-end checks against a running (ideally
   `TIME_SCALE=30`) server.
+- `node scripts/test-traderoutes.mjs` — trade-routes e2e against a running
+  server (route wire, market fog memory, foreign-stop payout). NOTE: it flashes
+  admin fog-reveal only briefly — leaving reveal ON makes the snapshot serialize
+  every entity for that player each tick and drags the whole server.
 - In-process tests (no server; run against `dist/`): `test-squads.mjs`,
-  `test-stances.mjs`, `test-diplomacy.mjs`, `test-caravan.mjs`,
-  `test-heal.mjs`, `test-worldgen.mjs`, `test-gates.mjs` (gates, road wear,
-  line orders).
+  `test-stances.mjs`, `test-diplomacy.mjs`, `test-caravan.mjs` (routes,
+  payouts, road-preferring caravan A*), `test-heal.mjs`, `test-worldgen.mjs`,
+  `test-gates.mjs` (gates incl. gate-over-wall, road wear, line orders).
 - `node scripts/render-map.mjs out.png` — generate + render a world to PNG
   (eyeball rivers/bridges/mountains). `node scripts/dev-sprite-sheet.mjs out.png`
   — contact sheet of all sprites.
 - **Map size:** `MAP_TILES` is 768. A DB seeded at another size can't migrate —
-  boot logs a warning; `node scripts/reset-world.mjs` regenerates. Worldgen:
-  heading-driven meandering rivers, straight 45°-snapped causeway bridges on
-  stable reaches, wandering ridges/massifs, dirt/flower ground variety. The
-  client tile layer is chunked (64 tiles) and culled per frame
-  (`render/tiles.ts` `TileLayer.cull`).
+  boot logs a warning; `node scripts/reset-world.mjs` regenerates. Worldgen
+  (v13): heading-driven meandering rivers, straight 45°-snapped causeway bridges
+  on stable reaches, wandering ridges/massifs whose punched passes are rocky
+  `TERRAIN_PASS` floor (not grass) — connectivity corridors through mountains
+  likewise; **swamps** hug rivers/lakes (passable but `SWAMP_SPEED_MULT`
+  movement + `SWAMP_ATTACK_MULT` damage while standing in them); long-grass
+  meadows, dirt/flower patches and rock outcrops vary the ground; forests are
+  bigger with denser carved trails; lakes absorb any fully-enclosed island so a
+  connectivity corridor never has to bridge a lake. The client tile layer is
+  chunked (64 tiles) and culled per frame (`render/tiles.ts` `TileLayer.cull`);
+  mountains autotile there via `tile_mountain_<mask>`.
 
 ## Gotchas (this is the first persistent-process project here)
 

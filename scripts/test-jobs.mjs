@@ -72,7 +72,8 @@ setTimeout(() => {
 
 setTimeout(() => {
   check('lumber camp built', own('lumbercamp').length >= 1, `camps=${own('lumbercamp').length}`);
-  check('lumberjack cap rose to 4 with a lumber camp', jobs && jobs.caps.lumberjack === 4, `cap=${jobs?.caps.lumberjack}`);
+  // TC grants 2 lumberjack slots; each camp adds 5 (v13).
+  check('lumberjack cap rose to 7 with a lumber camp', jobs && jobs.caps.lumberjack === 7, `cap=${jobs?.caps.lumberjack}`);
   const failed = results.filter((c) => !c).length;
   console.log(`\n${failed === 0 ? 'ALL PASS' : failed + ' FAILED'} (${results.length} checks)`);
   process.exit(failed === 0 ? 0 : 1);

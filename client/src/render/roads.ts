@@ -42,8 +42,14 @@ export class RoadLayer {
         this.container.addChild(s);
         this.sprites.set(tile, s);
       }
-      // A faint track at level 1 deepening into a packed road at full wear.
-      s.alpha = 0.18 + 0.82 * Math.min(1, lvl / ROAD_LEVELS);
+      // A faint track at level 1 deepening into a packed road; heavy-traffic
+      // tiles upgrade to the cobbled highway texture — busy trade arteries
+      // visibly outgrow the side tracks that feed them.
+      const f = Math.min(1, lvl / ROAD_LEVELS);
+      const paved = f >= 0.6 && tex.tile_road2;
+      const want = paved ? tex.tile_road2 : t;
+      if (s.texture !== want) s.texture = want;
+      s.alpha = paved ? 0.75 + 0.25 * f : 0.18 + 0.82 * f;
     }
   }
 

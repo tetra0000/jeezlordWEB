@@ -78,8 +78,8 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT entity_id, amount FROM resource_nodes').all() as Array<{ entity_id: number; amount: number }>)
     resourceById.set(r.entity_id, r.amount);
 
-  const tradeById = new Map<number, { state: string; home_id: number | null; target_id: number | null }>();
-  for (const t of h.prepare('SELECT entity_id, state, home_id, target_id FROM ent_trade').all() as Array<{ entity_id: number; state: string; home_id: number | null; target_id: number | null }>)
+  const tradeById = new Map<number, { state: string; route_id: number | null; stop_index: number | null; last_stop: number | null }>();
+  for (const t of h.prepare('SELECT entity_id, state, route_id, stop_index, last_stop FROM ent_trade').all() as Array<{ entity_id: number; state: string; route_id: number | null; stop_index: number | null; last_stop: number | null }>)
     tradeById.set(t.entity_id, t);
 
   const stanceById = new Map<number, string>();
@@ -126,9 +126,9 @@ export function loadWorld(db: Db, world: World): void {
       }
       if (kind === 'caravan') {
         const t = tradeById.get(id);
-        world.trader.set(id, t
-          ? { state: t.state as 'idle', homeId: t.home_id, targetId: t.target_id }
-          : { state: 'idle', homeId: null, targetId: null });
+        world.trader.set(id, t && t.route_id != null
+          ? { state: 'enroute', routeId: t.route_id, stopIndex: t.stop_index ?? 0, lastStopId: t.last_stop }
+          : { state: 'idle', routeId: null, stopIndex: 0, lastStopId: null });
       }
     } else if (isBuilding(kind)) {
       const f = BUILDING_STATS[kind].footprint;
@@ -181,6 +181,17 @@ export function loadWorld(db: Db, world: World): void {
   for (const r of h.prepare('SELECT tile, wear FROM road_wear').all() as Array<{ tile: number; wear: number }>)
     world.roadWear.set(r.tile, r.wear);
 
+  // Trade routes (validated against live markets by the trade system each tick).
+  for (const r of h.prepare('SELECT id, owner, stops_json FROM trade_routes').all() as Array<{ id: number; owner: number; stops_json: string }>) {
+    try {
+      const stops = JSON.parse(r.stops_json) as number[];
+      world.tradeRoutes.set(r.id, { id: r.id, owner: r.owner, stops });
+      world.nextRouteId = Math.max(world.nextRouteId, r.id + 1);
+    } catch {
+      /* corrupt row — skip */
+    }
+  }
+
   // Diplomacy relations + pending proposals.
   for (const d of h.prepare('SELECT a, b, state, proposer FROM diplomacy').all() as Array<{ a: number; b: number; state: string; proposer: number | null }>) {
     const key = `${d.a}:${d.b}`;
@@ -190,6 +201,8 @@ export function loadWorld(db: Db, world: World): void {
 
   const stored = db.getMeta('next_entity_id');
   if (stored) world.setNextId(Number(stored));
+  const nextRoute = db.getMeta('next_route_id');
+  if (nextRoute) world.nextRouteId = Math.max(world.nextRouteId, Number(nextRoute));
 
   // Restore the global market price multipliers (default to baseline 1.0).
   const mw = db.getMeta('market_wood'); if (mw) world.market.wood = Number(mw);

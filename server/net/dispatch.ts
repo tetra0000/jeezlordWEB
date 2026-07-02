@@ -37,7 +37,13 @@ import {
   restartPlayer,
 } from './session.js';
 import { clearMove, setMoveTarget, queueMoveTarget } from '../sim/systems/movement.js';
-import { assignTradeRoute } from '../sim/systems/trade.js';
+import {
+  assignCaravanToRoute,
+  createTradeRoute,
+  deleteTradeRoute,
+  quickTradeRoute,
+  stopTrading,
+} from '../sim/systems/trade.js';
 import { killEntity } from '../sim/systems/combat.js';
 import { spawnBuilding } from '../sim/spawn.js';
 import { visibleTileSet } from '../sim/systems/vision.js';
@@ -241,11 +247,7 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         }
         // A manual move order takes a caravan off its trade route.
         const tr = world.trader.get(id);
-        if (tr && tr.state !== 'idle') {
-          tr.state = 'idle';
-          tr.homeId = null;
-          tr.targetId = null;
-        }
+        if (tr) stopTrading(world, id, tr, false);
         if (msg.queue) queueMoveTarget(world, id, targets[i].x, targets[i].y);
         else setMoveTarget(world, id, targets[i].x, targets[i].y);
       });
@@ -289,8 +291,22 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       const { tileX, tileY } = msg;
       if (tileX < 0 || tileY < 0 || tileX + stat.footprint > MAP_PX / TILE || tileY + stat.footprint > MAP_PX / TILE)
         return session.reject('out of bounds');
-      if (!world.footprintFree(tileX, tileY, stat.footprint))
+      // A gate may be placed ON one of your own completed walls: the wall is
+      // torn down and replaced by the gate (you pay the gate's full cost).
+      let replaceWall: EntityId | null = null;
+      if (kind === 'gate' && !world.footprintFree(tileX, tileY, 1)) {
+        for (const [id, owner] of world.owner) {
+          if (owner !== playerId || world.kind.get(id) !== 'wall' || !world.isOperational(id)) continue;
+          const tf = world.transform.get(id)!;
+          if (Math.floor(tf.x / TILE) === tileX && Math.floor(tf.y / TILE) === tileY) {
+            replaceWall = id;
+            break;
+          }
+        }
+        if (replaceWall == null) return session.reject('space is occupied');
+      } else if (!world.footprintFree(tileX, tileY, stat.footprint)) {
         return session.reject('space is occupied');
+      }
       // Buildings with a courtyard (military buildings + the Town Center) reserve
       // a walkable path ring around them; that ring may not overlap a wall, other
       // building, resource node, or impassable terrain — so you can't place flush
@@ -303,15 +319,19 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       //  - Town Centers, Lumber Camps and Mining Camps may go anywhere else (no
       //    own territory required) — this is how you expand into new ground.
       //  - Every other building must sit fully inside your own territory.
-      const enemy = enemyTerritorySources(world, playerId);
-      if (footprintTouchesTerritory(enemy, tileX, tileY, stat.footprint))
-        return session.reject('cannot build inside enemy territory');
-      if (!PLACE_ANYWHERE_KINDS.includes(kind)) {
-        const sources = territorySources(world, playerId);
-        if (sources.length === 0)
-          return session.reject('build a town center first');
-        if (!footprintInTerritory(sources, tileX, tileY, stat.footprint))
-          return session.reject('must build inside your territory');
+      // Gate-over-wall skips the territory rules: the standing wall already
+      // proved the ground was buildable when it went up.
+      if (replaceWall == null) {
+        const enemy = enemyTerritorySources(world, playerId);
+        if (footprintTouchesTerritory(enemy, tileX, tileY, stat.footprint))
+          return session.reject('cannot build inside enemy territory');
+        if (!PLACE_ANYWHERE_KINDS.includes(kind)) {
+          const sources = territorySources(world, playerId);
+          if (sources.length === 0)
+            return session.reject('build a town center first');
+          if (!footprintInTerritory(sources, tileX, tileY, stat.footprint))
+            return session.reject('must build inside your territory');
+        }
       }
       if (!footprintVisible(world, playerId, tileX, tileY, stat.footprint))
         return session.reject('cannot build on unexplored land');
@@ -324,6 +344,8 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
       const s = world.players.get(playerId)!.stockpile;
       if (!canAfford(s, cost)) return session.reject('not enough resources');
       pay(world, playerId, cost);
+      // Gate-over-wall: tear the wall down first (frees its tile for the gate).
+      if (replaceWall != null) killEntity(world, replaceWall);
       // The foundation is placed; the kingdom's idle "builder" villagers will be
       // auto-tasked to it by the jobs system (no manual builder assignment).
       spawnBuilding(world, kind, playerId, tileX, tileY, true);
@@ -432,17 +454,59 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
     }
 
     case 'trade': {
-      // Route owned caravans to a market. First validation error is toasted.
+      // Quick-route owned caravans to another player's market (right-click).
+      // Creates/reuses a two-stop route. First validation error is toasted.
       if (world.kind.get(msg.marketId) !== 'market') return session.reject('that is not a market');
       let err: string | null = null;
       let assigned = 0;
       for (const id of msg.caravanIds) {
         if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'caravan') continue;
-        const e = assignTradeRoute(world, id, msg.marketId);
+        const e = quickTradeRoute(world, id, msg.marketId);
         if (e) err = e;
         else assigned++;
       }
       if (assigned === 0 && err) return session.reject(err);
+      return;
+    }
+
+    case 'tradeRoute': {
+      switch (msg.action) {
+        case 'create': {
+          const stops = (msg.stops ?? []).map(Number).filter((n) => Number.isFinite(n));
+          const created = createTradeRoute(world, playerId, stops);
+          if (typeof created === 'string') return session.reject(created);
+          // Any caravans sent along with the create are assigned straight away.
+          for (const id of msg.caravanIds ?? []) {
+            if (world.owner.get(id) !== playerId) continue;
+            assignCaravanToRoute(world, id, created.id);
+          }
+          return;
+        }
+        case 'delete': {
+          if (msg.routeId == null) return;
+          const err = deleteTradeRoute(world, playerId, msg.routeId);
+          if (err) return session.reject(err);
+          return;
+        }
+        case 'assign': {
+          let err: string | null = null;
+          let done = 0;
+          for (const id of msg.caravanIds ?? []) {
+            if (world.owner.get(id) !== playerId || world.kind.get(id) !== 'caravan') continue;
+            if (msg.routeId == null) {
+              const tr = world.trader.get(id);
+              if (tr) stopTrading(world, id, tr);
+              done++;
+            } else {
+              const e = assignCaravanToRoute(world, id, msg.routeId);
+              if (e) err = e;
+              else done++;
+            }
+          }
+          if (done === 0 && err) return session.reject(err);
+          return;
+        }
+      }
       return;
     }
 
@@ -554,12 +618,7 @@ export function dispatch(ctx: GameContext, session: Session, msg: ClientMsg): vo
         }
         // Stop also takes a caravan off its trade route.
         const tr = world.trader.get(id);
-        if (tr && tr.state !== 'idle') {
-          tr.state = 'idle';
-          tr.homeId = null;
-          tr.targetId = null;
-          world.markDirty(id);
-        }
+        if (tr) stopTrading(world, id, tr, false);
       }
       return;
     }

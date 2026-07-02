@@ -43,6 +43,16 @@ export function nearTarget(world: World, vid: EntityId, targetId: EntityId): boo
   const isBld = !!k && isBuilding(k);
   const f = footprintOf(world, targetId);
   const half = (f * TILE) / 2;
+  // Farms are worked from ON the field, not beside it (farm tiles are walkable
+  // for everyone): the villager's tile must be inside the farm's footprint.
+  // This also covers builders raising the farm — they stand on the plot.
+  if (k === 'farm') {
+    const x0 = Math.round(tt.x / TILE - f / 2);
+    const y0 = Math.round(tt.y / TILE - f / 2);
+    const vx = Math.floor(tf.x / TILE);
+    const vy = Math.floor(tf.y / TILE);
+    return vx >= x0 && vx < x0 + f && vy >= y0 && vy < y0 + f;
+  }
   const dx = Math.max(0, Math.abs(tf.x - tt.x) - half);
   const dy = Math.max(0, Math.abs(tf.y - tt.y) - half);
   // Buildings also accept DIAGONAL-corner adjacency (Chebyshev box test): a

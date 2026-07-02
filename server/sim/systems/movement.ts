@@ -1,11 +1,11 @@
 // Movement system: advance each moving entity along its pathfound waypoints in
 // continuous (off-grid) space. The grid is only used for planning; positions
 // are floats. Also exposes helpers for other systems to issue/cancel orders.
-import { ARRIVE_EPSILON, TILE } from '../../../shared/constants.js';
+import { ARRIVE_EPSILON, TILE, TERRAIN_SWAMP } from '../../../shared/constants.js';
 import type { Vec2 } from '../../../shared/types.js';
 import type { Movement } from '../components.js';
 import type { World } from '../world.js';
-import { speedOf } from '../../../shared/stats.js';
+import { ROAD_SPEED_BONUS, SWAMP_SPEED_MULT, speedOf } from '../../../shared/stats.js';
 
 // Issue a move order: set the final target and flag for repathing.
 export function setMoveTarget(world: World, id: number, x: number, y: number): void {
@@ -59,6 +59,18 @@ function dist(a: Vec2, b: { x: number; y: number }): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// Ground under a mover shapes its speed: swamp bogs everyone down; a worn-in
+// caravan road speeds everyone up (scaled by wear). Checked per tick from the
+// mover's current tile — cheap, and it means roads through swamps still help.
+export function terrainSpeedMult(world: World, x: number, y: number): number {
+  const tx = Math.floor(x / TILE);
+  const ty = Math.floor(y / TILE);
+  if (!world.inBounds(tx, ty)) return 1;
+  if (world.terrainAt(tx, ty) === TERRAIN_SWAMP) return SWAMP_SPEED_MULT;
+  const wear = world.roadWear.get(world.tileIndex(tx, ty)) ?? 0;
+  return wear > 0 ? 1 + ROAD_SPEED_BONUS * wear : 1;
+}
+
 export function movementSystem(world: World, dt: number): void {
   for (const [id, mv] of world.movement) {
     if (mv.repathCooldown > 0) mv.repathCooldown = Math.max(0, mv.repathCooldown - dt);
@@ -67,7 +79,7 @@ export function movementSystem(world: World, dt: number): void {
     const tf = world.transform.get(id);
     if (!tf) continue;
 
-    let remaining = mv.speed * dt;
+    let remaining = mv.speed * dt * terrainSpeedMult(world, tf.x, tf.y);
     while (remaining > 0 && mv.pathIndex < mv.path.length) {
       const wp = mv.path[mv.pathIndex];
       const d = dist(wp, tf);

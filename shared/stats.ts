@@ -101,16 +101,16 @@ export const UNIT_STATS: Record<string, UnitStat> = {
 };
 
 // --- trade caravans -----------------------------------------------------------
-// A caravan earns gold each time it comes home from the target market, scaled
-// by the route's length. Trading with ANOTHER player's market pays +50% — the
-// world economy rewards trading partners (and gives you a reason not to kill
-// everyone). Your own markets only count if they're far enough apart.
-export const CARAVAN_GOLD_PER_TILE = 1.0; // gold per tile of (one-way) route length
-export const CARAVAN_FOREIGN_BONUS = 1.5; // multiplier when the target market is another player's
-export const CARAVAN_MIN_OWN_TRADE_TILES = 40; // own-market routes must be at least this long
+// Caravans run TRADE ROUTES: an ordered loop of 2..TRADE_ROUTE_MAX_STOPS market
+// stops. A caravan earns gold on arrival at each FOREIGN stop (a market owned by
+// another player), scaled by the length of the leg it just travelled. Arriving
+// at your own market pays nothing — you cannot trade with yourself, and a route
+// whose stops are all your own is rejected outright.
+export const CARAVAN_GOLD_PER_TILE = 1.5; // gold per tile of leg length, paid at foreign stops
+export const TRADE_ROUTE_MAX_STOPS = 8;
 
-export function caravanGold(distTiles: number, foreign: boolean): number {
-  return Math.max(1, Math.round(distTiles * CARAVAN_GOLD_PER_TILE * (foreign ? CARAVAN_FOREIGN_BONUS : 1)));
+export function caravanGold(legTiles: number): number {
+  return Math.max(1, Math.round(legTiles * CARAVAN_GOLD_PER_TILE));
 }
 
 // How many soldiers of a squad are still standing at the given hp. Always at
@@ -141,8 +141,8 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
   // Resource-specific drop-off camps (cheap, place next to the resource). Each
   // also raises the matching job's capacity and opens a gather radius for it.
   mill: { hp: 300, vision: 4, footprint: 2, buildTime: 25, cost: { wood: 80 }, accepts: ['food'], gatherRadius: 9, jobSlots: { forager: 2 } },
-  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 2 }, walkable: true },
-  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 2, goldminer: 2 }, walkable: true },
+  lumbercamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['wood'], gatherRadius: 15, jobSlots: { lumberjack: 5 }, walkable: true },
+  miningcamp: { hp: 250, vision: 3, footprint: 1, buildTime: 20, cost: { wood: 60 }, accepts: ['gold', 'stone'], gatherRadius: 15, jobSlots: { stonemason: 5, goldminer: 5 }, walkable: true },
   farm: { hp: 120, vision: 1, footprint: 2, buildTime: 15, cost: { wood: 60 }, jobSlots: { farmer: 1 }, walkable: true },
   // Market: trade resources for gold (and back) at fluctuating prices, and
   // train trade caravans that shuttle gold between markets. Not a resource
@@ -160,13 +160,28 @@ export const BUILDING_STATS: Record<string, BuildingStat> = {
 };
 
 // --- caravan road wear -------------------------------------------------------
-// Trade caravans wear the ground they walk into roads (purely cosmetic). Each
-// caravan on an active route adds ROAD_WEAR_PER_S to the tile it stands on per
-// sim-second; wear caps at 1 and is quantised to ROAD_LEVELS steps on the wire.
-// A caravan crosses a tile in ~3 sim-seconds, so a full road takes roughly 30
-// round trips over the same ground.
+// Trade caravans wear the ground they walk into roads. Each caravan on an
+// active route adds ROAD_WEAR_PER_S to the tile it stands on per sim-second;
+// wear caps at 1 and is quantised to ROAD_LEVELS steps on the wire. A caravan
+// crosses a tile in ~3 sim-seconds, so a full road takes roughly 30 round trips
+// over the same ground.
+//
+// Roads are no longer purely cosmetic (v13):
+//  - Everyone MOVES faster on worn road (up to ROAD_SPEED_BONUS at full wear;
+//    movement.ts).
+//  - Caravan PATHFINDING prefers worn tiles (a step onto road costs down to
+//    ROAD_PATH_COST_MIN of a grass step; pathfinding.ts), so trade routes
+//    converge onto shared roads and reinforce them into highways.
 export const ROAD_WEAR_PER_S = 0.012;
 export const ROAD_LEVELS = 15; // wire quantisation: level = round(wear * ROAD_LEVELS)
+export const ROAD_SPEED_BONUS = 0.25; // +25% move speed on a fully worn road
+export const ROAD_PATH_COST_MIN = 0.55; // caravan A* cost multiplier at full wear
+
+// --- swamp ---------------------------------------------------------------------
+// Swamp terrain debuffs whoever stands in it: movement is slowed and attacks
+// land weaker. Applied per-tile in movement.ts / combat.ts.
+export const SWAMP_SPEED_MULT = 0.5;
+export const SWAMP_ATTACK_MULT = 0.75;
 
 // --- resource nodes --------------------------------------------------------
 export const RESOURCE_NODE_STATS: Record<string, ResourceNodeStat> = {

@@ -2,7 +2,13 @@
 // producing pixel-space waypoints (tile centres). A bounded request queue keeps
 // the per-tick cost capped; unreachable/oversized searches fail gracefully and
 // the unit falls back to a straight line.
+//
+// CARAVANS prefer roads: a step onto a worn road tile costs down to
+// ROAD_PATH_COST_MIN of a grass step (scaled by wear), so trade traffic bends
+// toward existing roads, converges onto shared ones, and wears them deeper —
+// small tracks reinforce into highways.
 import { MAP_TILES, TILE } from '../../../shared/constants.js';
+import { ROAD_PATH_COST_MIN } from '../../../shared/stats.js';
 import type { Vec2 } from '../../../shared/types.js';
 import type { World } from '../world.js';
 
@@ -112,6 +118,16 @@ export function findPath(
   const blocked = moverId != null
     ? (tx: number, ty: number): boolean => world.isBlockedTileFor(tx, ty, moverId)
     : (tx: number, ty: number): boolean => world.isBlockedTile(tx, ty);
+  // Caravans weigh steps by road wear (cheaper on worn road). The heuristic is
+  // scaled by the same minimum so it stays admissible.
+  const preferRoads = moverId != null && world.kind.get(moverId) === 'caravan';
+  const stepCostMult = preferRoads
+    ? (tx: number, ty: number): number => {
+        const wear = world.roadWear.get(ty * MAP_TILES + tx) ?? 0;
+        return 1 - (1 - ROAD_PATH_COST_MIN) * wear;
+      }
+    : null;
+  const hScale = preferRoads ? ROAD_PATH_COST_MIN : 1;
   const sx = toTile(sxPx);
   const sy = toTile(syPx);
   let gx = toTile(gxPx);
@@ -131,7 +147,7 @@ export function findPath(
   const gScore = new Map<number, number>();
   const open = new Heap();
   gScore.set(startIdx, 0);
-  open.push(startIdx, octile(sx, sy, gx, gy));
+  open.push(startIdx, octile(sx, sy, gx, gy) * hScale);
   const closed = new Set<number>();
 
   // Closest-to-goal tile settled so far. If the goal turns out unreachable or
@@ -171,12 +187,13 @@ export function findPath(
         }
         const ni = ny * MAP_TILES + nx;
         if (closed.has(ni)) continue;
-        const step = dx !== 0 && dy !== 0 ? DIAG : ORTHO;
+        let step = dx !== 0 && dy !== 0 ? DIAG : ORTHO;
+        if (stepCostMult) step *= stepCostMult(nx, ny);
         const tentative = cg + step;
         if (tentative < (gScore.get(ni) ?? Infinity)) {
           cameFrom.set(ni, cur);
           gScore.set(ni, tentative);
-          open.push(ni, tentative + octile(nx, ny, gx, gy));
+          open.push(ni, tentative + octile(nx, ny, gx, gy) * hScale);
         }
       }
     }

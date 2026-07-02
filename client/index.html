@@ -47,7 +47,7 @@
       <div id="villager-panel" class="hidden"></div>
       <div id="admin-panel" class="hidden"></div>
       <div id="info-panel" class="hidden"></div>
-      <div id="hint">Assign villager jobs (bottom-left) · L-click/drag: select army · R-click: move/attack/rally · Build inside your territory · WASD/wheel: pan/zoom · Esc: cancel</div>
+      <div id="hint">Villager jobs: bottom-left · Build menu: right edge · Trade routes: 🤝 menu → Trade · L-click/drag: select army · R-click: move/attack/rally · WASD/wheel: pan/zoom · Esc: cancel</div>
       <canvas id="minimap" width="200" height="200"></canvas>
       <div id="tooltip" class="hidden"></div>
       <div id="toast"></div>
@@ -67,11 +67,16 @@
       </div>
     </div>
 
-    <!-- Diplomacy menu: relations with every other player -->
+    <!-- Diplomacy & trade menu: relations with every other player, plus the
+         trade-route manager (known markets, route builder, caravan assignment) -->
     <div id="diplo-modal" class="hidden">
       <div class="modal diplo">
-        <div class="modal-title">🤝 Diplomacy</div>
+        <div class="dp-tabs">
+          <button id="tab-diplo" type="button" class="dp-tab active">🤝 Diplomacy</button>
+          <button id="tab-trade" type="button" class="dp-tab">🛒 Trade</button>
+        </div>
         <div id="diplo-list"></div>
+        <div id="trade-panel" class="hidden"></div>
         <div class="modal-buttons">
           <button id="diplo-close" type="button">Close</button>
         </div>

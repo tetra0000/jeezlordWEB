@@ -20,6 +20,10 @@ const COLORS = {
   5: [217, 200, 154], // beach
   6: [138, 116, 78],  // dirt
   7: [122, 150, 84],  // flowers
+  8: [64, 100, 50],   // long grass
+  9: [62, 74, 48],    // swamp
+  10: [140, 140, 148], // rocks
+  11: [112, 106, 100], // mountain pass
 };
 for (let i = 0; i < N * N; i++) {
   const c = COLORS[world.terrain[i]] ?? [255, 0, 255];

@@ -4,7 +4,7 @@
 import type { WebSocket } from 'ws';
 import { encode, type ServerMsg } from '../../shared/protocol.js';
 import type { EntityId, EntityView, PlayerId, Pop, Stockpile } from '../../shared/types.js';
-import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_DIRT, TERRAIN_FLOWERS } from '../../shared/constants.js';
+import { MAP_TILES, TILE, TERRAIN_GRASS, TERRAIN_DIRT, TERRAIN_FLOWERS, TERRAIN_LONGGRASS } from '../../shared/constants.js';
 import { encodeTerrainRLE } from '../../shared/terrain.js';
 import { BUILDING_STATS, ROAD_LEVELS } from '../../shared/stats.js';
 import type { Db } from '../db/db.js';
@@ -35,6 +35,7 @@ export class Session {
   lastMarket = ''; // last market-price key sent (so we only resend on change)
   lastDefeated = false; // last defeat state sent (sent only when it flips)
   lastDiplo = ''; // last diplomacy-roster key sent (so we only resend on change)
+  lastRoutes = ''; // last trade-routes key sent (so we only resend on change)
 
   constructor(readonly ws: WebSocket) {}
 
@@ -65,8 +66,9 @@ function spawnAreaDry(world: World, x: number, y: number): boolean {
   for (let dy = -SPAWN_DRY_RADIUS; dy <= SPAWN_DRY_RADIUS; dy++)
     for (let dx = -SPAWN_DRY_RADIUS; dx <= SPAWN_DRY_RADIUS; dx++) {
       const t = world.terrainAt(x + dx, y + dy);
-      // Grass-like cosmetic ground (dirt patches, flower meadows) is fine too.
-      if (t !== TERRAIN_GRASS && t !== TERRAIN_DIRT && t !== TERRAIN_FLOWERS) return false;
+      // Grass-like cosmetic ground (dirt patches, flower meadows, long grass)
+      // is fine too; swamp/rocks/mountain passes are not spawn ground.
+      if (t !== TERRAIN_GRASS && t !== TERRAIN_DIRT && t !== TERRAIN_FLOWERS && t !== TERRAIN_LONGGRASS) return false;
     }
   return true;
 }
@@ -240,6 +242,7 @@ function sendInit(ctx: GameContext, session: Session, playerId: PlayerId): void 
   session.lastMarket = '';
   session.lastDefeated = false;
   session.lastDiplo = '';
+  session.lastRoutes = '';
 }
 
 // Defeat restart: wipe everything the player still owns, reset their economy and
@@ -256,6 +259,16 @@ export function restartPlayer(ctx: GameContext, session: Session, playerId: Play
   p.jobDesired = {};
   world.markPlayerDirty(playerId);
   world.discoveredResources.delete(playerId);
+  world.discoveredMarkets.delete(playerId);
+
+  // Trade routes don't survive a defeat: the player's routes are dissolved
+  // (their caravans died with them; other players' routes are untouched).
+  for (const [rid, route] of world.tradeRoutes) {
+    if (route.owner === playerId) {
+      world.tradeRoutes.delete(rid);
+      world.routesDirty = true;
+    }
+  }
 
   // A fresh life starts diplomatically clean: every relation and pending offer
   // involving this player reverts to neutral (old wars don't follow them).

@@ -2,7 +2,7 @@
 // target positions) plus interpolated render positions, the local player's
 // identity/stockpile, and the current selection. Pure data — render and input
 // modules read/write this.
-import type { DiploEntry, EntityView, EntityId, JobReport, PlayerId, Pop, Relation, Stockpile } from '../../shared/types.js';
+import type { DiploEntry, EntityView, EntityId, JobReport, PlayerId, Pop, Relation, Stockpile, TradeRouteView } from '../../shared/types.js';
 import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
 import { TILE } from '../../shared/constants.js';
 import { BUILDING_STATS, isBuilding } from '../../shared/stats.js';
@@ -53,6 +53,9 @@ export class ClientState {
   defeated = false;
   // Diplomacy roster: our relation with every other player (from the delta).
   diplo: DiploEntry[] | null = null;
+  // Our trade routes (stops + assigned caravan counts), from the delta. Drives
+  // the Trade menu; null until the first delta carrying it arrives.
+  routes: TradeRouteView[] | null = null;
 
   // Relation with an entity owner ('ally' for self, 'neutral' if unknown).
   relationTo(owner: PlayerId | null): Relation {
@@ -76,6 +79,7 @@ export class ClientState {
     this.applyRoads(d.roads);
     if (d.defeated !== undefined) this.defeated = d.defeated;
     if (d.diplo) this.diplo = d.diplo;
+    if (d.routes) this.routes = d.routes;
     for (const v of d.enter) {
       this.entities.set(v.id, { view: v, rx: v.x, ry: v.y });
     }
@@ -122,6 +126,7 @@ export class ClientState {
     this.entities.clear();
     this.selection.clear();
     this.jobs = null;
+    this.routes = null;
     this.defeated = false; // a fresh init (incl. restart) clears the defeat state
     this.explored = null;
     this.exploredVersion = 0;

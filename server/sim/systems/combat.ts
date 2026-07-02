@@ -1,10 +1,11 @@
 // Combat system: target acquisition (commanded or auto), chasing, attack
 // cooldowns, damage, and death. Towers fire but don't move. Runs regardless of
 // owner online status, so bases can be raided while the owner is offline.
-import { TILE } from '../../../shared/constants.js';
+import { TILE, TERRAIN_SWAMP } from '../../../shared/constants.js';
 import {
   BUILDING_STATS,
   PROJECTILE_OF,
+  SWAMP_ATTACK_MULT,
   combatOf,
   damageMultiplier,
   isBuilding,
@@ -129,7 +130,10 @@ export function combatSystem(world: World, dt: number): void {
         // Squads deal damage proportional to men still standing, with class
         // counter bonuses (e.g. spearmen vs cavalry). Buildings hit at 1x.
         const myHp = world.health.get(id)!;
-        const mult = damageMultiplier(kind, myHp.hp, myHp.maxHp, world.kind.get(targetId));
+        let mult = damageMultiplier(kind, myHp.hp, myHp.maxHp, world.kind.get(targetId));
+        // Swamp debuff: an attacker standing in the bog swings weaker.
+        if (world.terrainAt(Math.floor(tf.x / TILE), Math.floor(tf.y / TILE)) === TERRAIN_SWAMP)
+          mult *= SWAMP_ATTACK_MULT;
         hp.hp -= stat.attack * mult;
         cs.cooldownLeft = stat.attackCooldown;
         world.markDirty(targetId);

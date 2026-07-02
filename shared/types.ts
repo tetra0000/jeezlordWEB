@@ -157,9 +157,9 @@ export interface EntityView {
   gate?: GateMode; // gates: current mode (public — it's physically observable)
   job?: VillagerJob; // villagers: current job (sent to the owner only)
   stance?: Stance; // military squads: current stance (sent to the owner only)
-  // Caravans: the active trade route (market entity ids) and the gold earned
-  // per delivery. Sent to the owner only.
-  trade?: { home: EntityId; target: EntityId; gold: number; foreign: boolean };
+  // Caravans: the trade route they're assigned to, the stop they're currently
+  // heading for, and the estimated gold per full circuit. Sent to the owner only.
+  trade?: { route: number; next: EntityId; gold: number };
   path?: Vec2[]; // units: remaining move waypoints in world px (sent to the owner only)
   // Corpses (kind === 'corpse'): the unit kind that died (which sprite to draw),
   // its team (original owner, for tinting; the corpse entity itself is neutral),
@@ -170,6 +170,26 @@ export interface EntityView {
 export interface Pop {
   used: number;
   cap: number;
+}
+
+// One stop of a trade route, as seen by the route's owner: the market entity,
+// where it stands (for the map/zoom-to UI), and whose it is.
+export interface TradeStopView {
+  id: EntityId;
+  x: number;
+  y: number;
+  owner: PlayerId | null;
+}
+
+// A player's trade route (owner-only, in the delta): an ordered loop of market
+// stops (2..TRADE_ROUTE_MAX_STOPS) that assigned caravans cycle through. Gold is
+// earned on arrival at each FOREIGN stop, scaled by the leg length — trading
+// with yourself pays nothing (and pure own-market routes are rejected outright).
+export interface TradeRouteView {
+  id: number;
+  stops: TradeStopView[];
+  caravans: number; // caravans currently assigned to this route
+  gold: number; // estimated gold per full circuit (per caravan)
 }
 
 // Per-player villager-jobs summary (sent to the owner only, in the delta).

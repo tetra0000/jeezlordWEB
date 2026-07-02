@@ -4,7 +4,7 @@
 // serialized), diffs against what was last sent, and emits enter/update/leave
 // plus stockpile/population changes.
 import type { DeltaMsg, MarketState } from '../../shared/protocol.js';
-import type { DiploEntry, EntityId, EntityView, JobReport, Pop, Shot, Stockpile, Vec2 } from '../../shared/types.js';
+import type { DiploEntry, EntityId, EntityView, JobReport, Pop, Shot, Stockpile, TradeRouteView, Vec2 } from '../../shared/types.js';
 import type { Session } from './session.js';
 import { World } from '../sim/world.js';
 import { MAP_TILES, TILE } from '../../shared/constants.js';
@@ -40,8 +40,8 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
     a.gate !== b.gate ||
     a.job !== b.job ||
     a.stance !== b.stance ||
-    a.trade?.target !== b.trade?.target ||
-    a.trade?.home !== b.trade?.home ||
+    a.trade?.route !== b.trade?.route ||
+    a.trade?.next !== b.trade?.next ||
     a.corpse?.fade !== b.corpse?.fade ||
     a.corpse?.kind !== b.corpse?.kind ||
     pathChanged(a.path, b.path)
@@ -50,7 +50,8 @@ function viewChanged(a: EntityView, b: EntityView): boolean {
 
 // Entities the player may currently see:
 //  - their own (always),
-//  - resource nodes they've discovered (persist through fog, AoE-style memory),
+//  - resource nodes AND markets they've discovered (persist through fog,
+//    AoE-style memory — markets stay routable trade partners once found),
 //  - any other entity standing on a currently-visible tile.
 // Out-of-vision ENEMY entities are never serialized (the anti-cheat boundary).
 function visibleViews(world: World, playerId: number): Map<EntityId, EntityView> {
@@ -69,6 +70,11 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
     discovered = new Set<EntityId>();
     world.discoveredResources.set(playerId, discovered);
   }
+  let knownMarkets = world.discoveredMarkets.get(playerId);
+  if (!knownMarkets) {
+    knownMarkets = new Set<EntityId>();
+    world.discoveredMarkets.set(playerId, knownMarkets);
+  }
 
   const out = new Map<EntityId, EntityView>();
   for (const id of world.entityIds()) {
@@ -78,10 +84,16 @@ function visibleViews(world: World, playerId: number): Map<EntityId, EntityView>
       const tx = Math.floor(tf.x / TILE);
       const ty = Math.floor(tf.y / TILE);
       const inVision = reveal || visTiles.has(ty * MAP_TILES + tx);
-      if (isResourceNode(world.kind.get(id)!)) {
+      const kind = world.kind.get(id)!;
+      if (isResourceNode(kind)) {
         // Neutral resource: reveal once discovered, then keep revealing it.
         if (inVision) discovered.add(id);
         else if (!discovered.has(id)) continue;
+      } else if (kind === 'market') {
+        // Markets get the same memory: once seen, they stay on your map (a
+        // trade partner has to stay routable through fog).
+        if (inVision) knownMarkets.add(id);
+        else if (!knownMarkets.has(id)) continue;
       } else if (!inVision) {
         continue; // out-of-vision enemy/neutral — never sent
       }
@@ -199,6 +211,29 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
     }
   }
 
+  // Trade routes: the player's routes (stops + assigned caravan counts).
+  // Small; rebuilt each tick and sent only when the key changes.
+  let routes: TradeRouteView[] | undefined;
+  {
+    const list: TradeRouteView[] = [];
+    for (const route of world.tradeRoutes.values()) {
+      if (route.owner !== playerId) continue;
+      let caravans = 0;
+      for (const tr of world.trader.values()) if (tr.routeId === route.id) caravans++;
+      const stops = route.stops.map((s) => {
+        const tf = world.transform.get(s);
+        return { id: s, x: tf?.x ?? 0, y: tf?.y ?? 0, owner: world.owner.get(s) ?? null };
+      });
+      list.push({ id: route.id, stops, caravans, gold: world.routeCircuitGold(route) });
+    }
+    list.sort((a, b) => a.id - b.id);
+    const rKey = JSON.stringify(list);
+    if (rKey !== session.lastRoutes) {
+      routes = list;
+      session.lastRoutes = rKey;
+    }
+  }
+
   // Defeat state (no units left, none training) — sent only when it flips.
   let defeated: boolean | undefined;
   const defeatedNow = !world.isAlive(playerId);
@@ -221,7 +256,7 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   const roads = world.roadEvents.length > 0 ? [...world.roadEvents] : undefined;
 
   if (enter.length === 0 && update.length === 0 && leave.length === 0 &&
-      !you && !pop && !jobs && !market && defeated === undefined && !shots && !diplo && !roads)
+      !you && !pop && !jobs && !market && defeated === undefined && !shots && !diplo && !roads && !routes)
     return null;
   const delta: DeltaMsg = { t: 'delta', tick, enter, update, leave };
   if (dead.length) delta.dead = dead;
@@ -233,5 +268,6 @@ export function buildDelta(world: World, session: Session, tick: number): DeltaM
   if (shots) delta.shots = shots;
   if (diplo) delta.diplo = diplo;
   if (roads) delta.roads = roads;
+  if (routes) delta.routes = routes;
   return delta;
 }

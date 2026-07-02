@@ -487,6 +487,59 @@ pair('wall', 32, (im, tm) => {
   tm.rect(13, 12, 6, 6, TEAM, 210); // small painted crest on the face
   tm.rect(13, 16, 6, 2, TEAM_SH, 210);
 });
+
+// --- autotiling wall variants (v13) -------------------------------------------
+// wall_<mask>.png: one variant per 4-neighbour connection mask (bit 1 = a wall/
+// gate to the NORTH, 2 = EAST, 4 = SOUTH, 8 = WEST). Arms run flush to the tile
+// edge on connected sides so adjacent segments read as one continuous wall;
+// unconnected runs get a square end-tower cap. The client picks the variant per
+// wall from its neighbours and keeps tinting the shared team_wall crest overlay.
+function wallHBand(im, x0, x1) {
+  const y = 10, h = 16;
+  im.rect(x0, y, x1 - x0, h, STONEC);
+  for (let yy = y + 4; yy < y + h - 2; yy += 5) im.rect(x0, yy, x1 - x0, 1, STONEC_D, 150); // courses
+  for (let yy = y + 4, row = 0; yy < y + h - 2; yy += 5, row++)
+    for (let px = x0 + (row % 2 ? 3 : 7); px < x1 - 1; px += 8) im.rect(px, yy - 4, 1, 4, STONEC_D, 110); // joints
+  im.rect(x0, y, x1 - x0, 2, STONEC_W); // lit top
+  im.rect(x0, y + h - 3, x1 - x0, 3, STONEC_D); // base shade
+  for (let x = x0; x < x1; x += 7) { // crenellations along the walk
+    im.rect(x, 6, 5, 4, STONEC);
+    im.rect(x, 6, 5, 1, STONEC_W);
+  }
+}
+function wallVBand(im, y0, y1) {
+  const x = 10, w = 12;
+  im.rect(x, y0, w, y1 - y0, STONEC);
+  for (let yy = y0 + 3; yy < y1 - 1; yy += 5) im.rect(x, yy, w, 1, STONEC_D, 150); // courses
+  im.rect(x, y0, 2, y1 - y0, STONEC_W); // lit west face
+  im.rect(x + w - 3, y0, 3, y1 - y0, STONEC_D); // shaded east face
+  for (let yy = y0 + 1; yy < y1; yy += 7) im.rect(x - 2, yy, 2, 4, STONEC_D); // west-side merlons
+}
+function wallCap(im) {
+  im.rect(8, 8, 16, 20, STONEC); // end/junction tower
+  for (let yy = 12; yy < 26; yy += 5) im.rect(8, yy, 16, 1, STONEC_D, 150);
+  im.rect(8, 8, 16, 2, STONEC_W);
+  im.rect(8, 25, 16, 3, STONEC_D);
+  im.rect(21, 8, 3, 20, STONEC_D);
+  for (const cx of [8, 14, 20]) { // tower crenellations
+    im.rect(cx, 4, 4, 5, STONEC);
+    im.rect(cx, 4, 4, 1, STONEC_W);
+  }
+}
+for (let m = 0; m < 16; m++) {
+  const im = new Img(32, 32);
+  const n = m & 1, e = m & 2, s = m & 4, w = m & 8;
+  if (n && s) wallVBand(im, 0, 32);
+  else if (n) wallVBand(im, 0, 20);
+  else if (s) wallVBand(im, 14, 32);
+  if (w && e) wallHBand(im, 0, 32);
+  else if (w) wallHBand(im, 0, 18);
+  else if (e) wallHBand(im, 14, 32);
+  // A straight run needs no cap; ends, corners and junctions get the tower.
+  if (m !== 5 && m !== 10) wallCap(im);
+  im.outline();
+  im.save('wall_' + m);
+}
 // Gate: a wall block with heavy wooden doors. Closed base + an open variant
 // (the client swaps textures when the mode is 'open'). Same team crest banner.
 function gateBase(im, doorsOpen) {
@@ -550,6 +603,69 @@ function tree() {
   im.outline([30, 50, 26]);
   im.save('tree');
 }
+// Autotiling forest canopies (v13). tree_<mask>.png, bit 1 = a tree to the
+// NORTH, 2 = EAST, 4 = SOUTH, 8 = WEST. Connected sides grow the canopy flush
+// to the tile edge so adjacent trees merge into one continuous woodland roof;
+// tree_0 is the lone tree (same look as tree.png). The client draws connected
+// variants at full tile size so the canopies actually meet.
+function treeMask(m) {
+  const im = new Img(32, 32);
+  const n = m & 1, e = m & 2, s = m & 4, w = m & 8;
+  let seed = 811 + m * 97;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const DARK = [42, 92, 38];
+  const MID = [54, 110, 46];
+  const LIT = [72, 134, 58];
+  const GLINT = [96, 158, 74];
+  if (m === 0) {
+    // Lone tree: trunk + clumped crown (mirrors tree()).
+    im.ellipse(16, 29, 9, 2, [24, 34, 20], 110);
+    im.rect(14, 20, 5, 10, [104, 70, 38]);
+    im.rect(14, 20, 2, 10, [126, 88, 48]);
+    im.circle(16, 14, 11, MID);
+    im.circle(12, 11, 6, LIT);
+    im.circle(21, 13, 6, DARK);
+    im.circle(17, 8, 4, [86, 148, 66]);
+    for (const [x, y] of [[10, 16], [19, 18], [14, 12], [22, 10]]) im.px(x, y, GLINT);
+  } else {
+    // Trunk peeks out under the canopy when the south side is open.
+    if (!s) {
+      im.ellipse(16, 30, 8, 2, [24, 34, 20], 110);
+      im.rect(14, 22, 5, 9, [104, 70, 38]);
+      im.rect(14, 22, 2, 9, [126, 88, 48]);
+    }
+    // Core canopy + arms flush to each connected edge.
+    im.circle(16, 15, 12, MID);
+    if (n) im.rect(3, 0, 26, 16, MID);
+    if (s) im.rect(3, 16, 26, 16, MID);
+    if (w) im.rect(0, 3, 16, 26, MID);
+    if (e) im.rect(16, 3, 16, 26, MID);
+    // Fill the corner between two connected sides so 2x2 blocks close up.
+    if (n && w) im.rect(0, 0, 16, 16, MID);
+    if (n && e) im.rect(16, 0, 16, 16, MID);
+    if (s && w) im.rect(0, 16, 16, 16, MID);
+    if (s && e) im.rect(16, 16, 16, 16, MID);
+    // Clumpy texture: lit tops (upper-left bias) and dark hollows.
+    for (let i = 0; i < 26; i++) {
+      const x = rnd() * 32, y = rnd() * 32;
+      const idx = (Math.round(y) * 32 + Math.round(x)) * 4;
+      if (im.d[idx + 3] < 100) continue; // only over canopy
+      const r = 1 + Math.floor(rnd() * 3);
+      im.circle(x, y, r, rnd() < 0.5 ? (y < 14 ? LIT : DARK) : MID, 200);
+    }
+    for (let i = 0; i < 10; i++) {
+      const x = rnd() * 32, y = rnd() * 32;
+      const idx = (Math.round(y) * 32 + Math.round(x)) * 4;
+      if (im.d[idx + 3] > 100) im.px(x, y, GLINT);
+    }
+    // Sun-lit rim along open (unconnected) sides.
+    if (!n) for (let x = 4; x < 28; x++) if (rnd() < 0.7) im.px(x, 4 + Math.round(rnd() * 2), LIT);
+    if (!w) for (let y = 6; y < 26; y++) if (rnd() < 0.6) im.px(5 + Math.round(rnd() * 2), y, LIT);
+  }
+  im.outline([30, 50, 26]);
+  im.save('tree_' + m);
+}
+
 function gold() {
   const im = new Img(32, 32);
   im.ellipse(16, 28, 11, 2, [24, 24, 20], 110);
@@ -664,6 +780,56 @@ function mountainTile() {
   }
   im.save('tile_mountain');
 }
+
+// Autotiling mountain tiles (v13). tile_mountain_<mask>.png, bit 1 = mountain
+// to the NORTH, 2 = EAST, 4 = SOUTH, 8 = WEST. Interior tiles are craggy rock
+// (fully-enclosed ones grow snow-capped peaks); open sides get a lit ridge line
+// (north/west) or a cliff-shadow drop (south/east), so a range reads as one
+// connected massif with real edges rather than a checkerboard of cones.
+function mountainMask(m) {
+  const im = new Img(32, 32);
+  const n = m & 1, e = m & 2, s = m & 4, w = m & 8;
+  let seed = 5150 + m * 131;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [86, 84, 88]);
+  for (let i = 0; i < 70; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [98, 96, 100] : [72, 70, 74]);
+  // Craggy facets: angular light/dark shards.
+  for (let i = 0; i < 7; i++) {
+    const x = rnd() * 32, y = rnd() * 32;
+    const c = rnd() < 0.5 ? [108, 106, 112] : [66, 64, 70];
+    im.line(x, y, x + (rnd() - 0.5) * 14, y + (rnd() - 0.5) * 14, c, 1);
+  }
+  if (m === 15) {
+    // Fully interior: a snow-capped peak.
+    const px = 12 + Math.floor(rnd() * 8);
+    const ph = 20 + Math.floor(rnd() * 8);
+    for (let i = 0; i < ph; i++) {
+      const wdt = Math.round((i / ph) * 10);
+      im.rect(px - wdt, 30 - i, 2 * wdt + 1, 1, [122, 120, 124]);
+    }
+    im.rect(px - 3, 30 - ph, 6, 4, [232, 234, 240]);
+    im.rect(px - 1, 29 - ph, 3, 2, [246, 248, 252]);
+  }
+  // Open edges: lit ridge to the north/west sun, cliff shadow to south/east.
+  if (!n) {
+    im.rect(0, 0, 32, 2, [138, 136, 142]);
+    for (let x = 0; x < 32; x += 3) im.px(x + Math.floor(rnd() * 2), 2, [122, 120, 126]);
+  }
+  if (!w) {
+    im.rect(0, 0, 2, 32, [122, 120, 126]);
+    for (let y = 0; y < 32; y += 3) im.px(2, y + Math.floor(rnd() * 2), [110, 108, 114]);
+  }
+  if (!s) {
+    im.rect(0, 29, 32, 3, [56, 54, 60]);
+    im.rect(0, 27, 32, 2, [68, 66, 72]);
+    for (let x = 0; x < 32; x += 4) im.rect(x + Math.floor(rnd() * 2), 26, 2, 1, [62, 60, 66]);
+  }
+  if (!e) {
+    im.rect(29, 0, 3, 32, [62, 60, 66]);
+    im.rect(27, 0, 2, 32, [72, 70, 76]);
+  }
+  im.save('tile_mountain_' + m);
+}
 function mud() {
   const im = new Img(32, 32);
   let seed = 9157;
@@ -672,6 +838,85 @@ function mud() {
   const specks = [[88, 62, 36], [122, 92, 58], [72, 50, 30]];
   for (let i = 0; i < 90; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 3)], 150 + rnd() * 90);
   im.save('tile_mud');
+}
+function longgrass() {
+  const im = new Img(32, 32);
+  let seed = 8871;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [64, 100, 50]); // deeper green base
+  for (let i = 0; i < 60; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [72, 110, 56] : [56, 88, 44]);
+  // Tall blades: short vertical strokes with lit tips, leaning slightly.
+  for (let i = 0; i < 46; i++) {
+    const x = 1 + rnd() * 30;
+    const y = 6 + rnd() * 25;
+    const h = 4 + rnd() * 5;
+    const lean = (rnd() - 0.5) * 2.5;
+    const c = rnd() > 0.5 ? [96, 138, 66] : [82, 124, 58];
+    im.line(x, y, x + lean, y - h, c, 0);
+    im.px(x + lean, y - h, [130, 168, 88]); // lit tip
+  }
+  // The odd seed head.
+  for (let i = 0; i < 5; i++) im.px(2 + rnd() * 28, 4 + rnd() * 24, [188, 172, 96]);
+  im.save('tile_longgrass');
+}
+function swamp() {
+  const im = new Img(32, 32);
+  let seed = 7717;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [62, 74, 48]); // murky green-brown
+  for (let i = 0; i < 80; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [72, 84, 54] : [50, 62, 40]);
+  // Standing-water pools with a pale sheen.
+  for (let i = 0; i < 4; i++) {
+    const x = 3 + rnd() * 26, y = 3 + rnd() * 26;
+    const rx = 2 + rnd() * 4, ry = 1 + rnd() * 2;
+    im.ellipse(x, y, rx, ry, [46, 66, 66]);
+    im.ellipse(x, y, rx, ry, [40, 58, 58], 120);
+    im.px(x - 1, y, [110, 138, 130]); // sheen glint
+  }
+  // Reeds poking out of the bog.
+  for (let i = 0; i < 10; i++) {
+    const x = 2 + rnd() * 28, y = 8 + rnd() * 22;
+    im.line(x, y, x + (rnd() - 0.5) * 2, y - 4 - rnd() * 3, [88, 106, 56], 0);
+    if (rnd() < 0.4) im.px(x, y - 5, [140, 118, 74]); // cattail head
+  }
+  im.save('tile_swamp');
+}
+function rocksTile() {
+  const im = new Img(32, 32);
+  let seed = 6613;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [74, 106, 58]); // grass base, boulders on top
+  for (let i = 0; i < 50; i++) im.px(rnd() * 32, rnd() * 32, rnd() > 0.5 ? [80, 116, 62] : [64, 96, 52]);
+  for (let i = 0; i < 6; i++) {
+    const x = 4 + rnd() * 24, y = 5 + rnd() * 23;
+    const r = 2 + rnd() * 3;
+    im.ellipse(x, y + r * 0.5, r, 1, [30, 40, 26], 90); // ground shadow
+    im.circle(x, y, r, [140, 140, 148]);
+    im.circle(x - 1, y - 1, Math.max(1, r - 1), [166, 166, 174]);
+    im.px(x - 1, y - r + 1, [198, 198, 206]); // lit top
+  }
+  for (let i = 0; i < 8; i++) im.px(2 + rnd() * 28, 2 + rnd() * 28, [120, 120, 128]); // pebbles
+  im.save('tile_rocks');
+}
+function passTile() {
+  const im = new Img(32, 32);
+  let seed = 3307;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  im.rect(0, 0, 32, 32, [112, 106, 100]); // bare rocky floor — no grass in a pass
+  const specks = [[128, 122, 116], [96, 90, 86], [140, 136, 130], [84, 80, 76]];
+  for (let i = 0; i < 120; i++) im.px(rnd() * 32, rnd() * 32, specks[Math.floor(rnd() * 4)], 140 + rnd() * 100);
+  // Scree: small sharp stones and the odd larger slab.
+  for (let i = 0; i < 7; i++) {
+    const x = 2 + rnd() * 28, y = 2 + rnd() * 28;
+    im.circle(x, y, 1, [150, 146, 140]);
+    im.px(x, y - 1, [172, 168, 162]);
+  }
+  for (let i = 0; i < 2; i++) {
+    const x = 4 + rnd() * 24, y = 4 + rnd() * 24;
+    im.ellipse(x, y, 3, 2, [130, 124, 118]);
+    im.px(x - 1, y - 1, [160, 156, 150]);
+  }
+  im.save('tile_pass');
 }
 function beach() {
   const im = new Img(32, 32);
@@ -728,6 +973,40 @@ function road() {
   }
   for (let i = 0; i < 5; i++) im.px(2 + rnd() * 28, 2 + rnd() * 28, [160, 152, 138], 180);
   im.save('tile_road');
+}
+// Established road: the heavy-traffic tier (high wear levels). Packed pale
+// surface with cobbled edges and kerb stones — the client swaps a worn track's
+// texture to this once wear crosses the threshold, so busy trade arteries read
+// as built highways rather than deeper mud.
+function road2() {
+  const S = 32;
+  const im = new Img(S, S);
+  let seed = 9944;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const ex = Math.min(x, S - 1 - x) / (S / 2);
+      const ey = Math.min(y, S - 1 - y) / (S / 2);
+      const edge = Math.min(1, (ex + 0.35) * (ey + 0.35) * 2.0);
+      const a = Math.max(0, Math.min(1, edge - rnd() * 0.15)) * 255;
+      if (a < 12) continue;
+      const t = rnd();
+      const c = t < 0.15 ? [150, 138, 114] : t < 0.3 ? [178, 166, 140] : [164, 152, 126];
+      im.px(x, y, c, a);
+    }
+  // Cobbles: a loose grid of rounded stones.
+  for (let cy = 3; cy < S - 2; cy += 5)
+    for (let cx = 3 + ((cy / 5) % 2) * 2; cx < S - 2; cx += 5) {
+      const x = cx + (rnd() - 0.5) * 2, y = cy + (rnd() - 0.5) * 2;
+      im.circle(x, y, 1, [148, 136, 112], 190);
+      im.px(x, y - 1, [190, 178, 152]);
+    }
+  // Kerb stones along both long edges.
+  for (let x = 0; x < S; x += 4) {
+    im.rect(x, 1, 3, 2, [136, 128, 116], 220);
+    im.rect(x, 29, 3, 2, [120, 112, 100], 220);
+  }
+  im.save('tile_road2');
 }
 
 // --- environment decor (16x16 props scattered on the grass client-side) ------
@@ -893,6 +1172,7 @@ fx('slash', (im) => { for (let a = -0.6; a < 0.6; a += 0.08) im.px(8 + Math.cos(
 
 // --- run everything -------------------------------------------------------------
 tree();
+for (let m = 0; m < 16; m++) treeMask(m);
 gold();
 stone();
 berry();
@@ -900,12 +1180,18 @@ grass();
 water();
 bridge();
 mountainTile();
+for (let m = 0; m < 16; m++) mountainMask(m);
 mud();
 beach();
 dirt();
 flowers();
+longgrass();
+swamp();
+rocksTile();
+passTile();
 path();
 road();
+road2();
 decorRock();
 decorTuft();
 decorShroom();
